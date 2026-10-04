@@ -139,6 +139,9 @@ header, and never expose port 8000 without TLS.)
 
 ## Deploy on Coolify
 
+> A step-by-step walkthrough, including moving an existing deployment's data across, is in
+> [DEPLOY-COOLIFY.md](DEPLOY-COOLIFY.md).
+
 Coolify builds everything from your Git repository. Nothing is pasted into Coolify and nothing
 needs to exist on the server beforehand.
 

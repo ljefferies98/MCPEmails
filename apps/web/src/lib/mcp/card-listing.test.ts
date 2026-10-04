@@ -347,6 +347,9 @@ const SENTINEL_EXEMPT = new Set([
 const SQL_ALLOWED = new Set([
   'supabase/migrations/20260916160000_card_build_notified.sql',
   'supabase/migrations/20260916180000_card_build_notified_comment.sql',
+  // Self-host's port of 20260916160000: adds the nullable column with no
+  // default and writes no value, exactly like the hosted migration.
+  'self-host/db/migrations/0005_api_keys_parity.sql',
 ]);
 
 /**
