@@ -1,0 +1,43 @@
+# Intentional differences between the self-host schema and the hosted schema
+# (supabase/migrations) on tables the MCP server uses. Checked by
+# self-host/tests/schema-parity.sh: any difference NOT listed here fails, and
+# any line here that no longer matches a difference also fails.
+#
+# kind<TAB>table<TAB>name<TAB>reason
+# kind: column | check | unique | table ; name: column/constraint name, or the
+# sorted column list (plus " where ...") for unique keys.
+#
+# Rule of thumb: only hosted-only data the server never reads or writes, and
+# structure that self-host cannot or need not share, belongs here.
+column	users	id	hosted ids come from auth.users; self-host has no auth schema so users.id defaults to gen_random_uuid()
+column	users	marketing_consent_at	marketing consent captured at web sign-up; no sign-up on self-host
+column	users	marketing_consent_source	marketing consent captured at web sign-up
+column	users	unsubscribe_token	marketing/lifecycle email unsubscribe links
+column	users	unsubscribed_at	marketing/lifecycle email preferences
+column	users	unsubscribed_categories	marketing/lifecycle email preferences
+check	users	users_marketing_consent_pair	marketing consent
+check	users	users_marketing_consent_source_known	marketing consent
+check	users	users_unsubscribed_categories_known	marketing/lifecycle email preferences
+unique	users	unsubscribe_token	marketing/lifecycle email unsubscribe links
+column	workspaces	stripe_customer_id	Stripe billing
+column	workspaces	acquisition_email_segment	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_email_segment_check	marketing acquisition attribution
+column	workspaces	acquisition_landing	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_landing_check	marketing acquisition attribution
+column	workspaces	acquisition_landing_path	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_landing_path_check	marketing acquisition attribution
+column	workspaces	acquisition_locale	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_locale_check	marketing acquisition attribution
+column	workspaces	acquisition_referrer	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_referrer_check	marketing acquisition attribution
+column	workspaces	acquisition_source	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_source_check	marketing acquisition attribution
+column	workspaces	acquisition_utm_campaign	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_utm_campaign_check	marketing acquisition attribution
+column	workspaces	acquisition_utm_medium	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_utm_medium_check	marketing acquisition attribution
+column	workspaces	acquisition_utm_source	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_utm_source_check	marketing acquisition attribution
+unique	activity_log	created_at,id	hosted range-partitions activity_log by created_at, which forces it into the primary key
+unique	activity_log	id	self-host keeps activity_log unpartitioned with a plain primary key
+unique	inboxes	email_address,workspace_id where (deleted_at IS NULL)	redundant on both sides: the full unique key on (workspace_id, email_address) already exists (self-host idx_inboxes_workspace_email)

@@ -26086,7 +26086,7 @@ async function executeCreateReplyDraft(
       const { folder, uid } = decodeImapId(messageId);
       if (!Number.isFinite(uid) || uid <= 0) throw new Error("message_not_found");
       if (!inbox.imap_host || !inbox.imap_port || !inbox.imap_password) throw new Error("imap_auth_failed");
-      const client = await ImapClient.connect({ host: inbox.imap_host, port: inbox.imap_port, email: imapAuthUser(inbox), password: await decryptStoredToken(inbox.imap_password) });
+      const client = await ImapClient.connect({ host: inbox.imap_host, port: inbox.imap_port, email: imapAuthUser(inbox), password: await decryptStoredToken(inbox.imap_password), security: inbox.imap_security ?? "tls" });
       try {
         await client.selectMailbox(imapMailboxForServerFolder(folder));
         const source = await client.fetchMessageRaw(uid);

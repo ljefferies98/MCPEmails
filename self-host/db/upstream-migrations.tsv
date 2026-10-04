@@ -1,0 +1,151 @@
+# Every migration in supabase/migrations, and what self-host does about it.
+#
+# The hosted migrations cannot run on self-host as written: they depend on
+# Supabase Auth (auth.users, auth.uid()), extensions.moddatetime, pg_cron,
+# pg_net and Vault, and some hard-code the hosted project's URL. Self-host
+# instead keeps its own numbered migrations in ./migrations, ported by hand,
+# and this file is the ledger that keeps the two in step.
+#
+# self-host/tests/manifest.test.ts fails when a migration exists upstream that
+# is not listed here, so a schema change can no longer reach the server
+# without someone deciding what it means for self-host.
+#
+# Columns (tab-separated):
+#   upstream file | disposition | detail
+# disposition:
+#   ported   everything relevant to the MCP server is in the listed self-host migration(s)
+#   partial  the listed self-host migration(s) carry the server-facing part; detail says what is left out
+#   skipped  nothing the self-host MCP server reads or writes; detail says why
+# The detail of ported/partial starts with the self-host migration number(s), e.g. "0003,0006: ...".
+#
+# When adding an upstream migration that touches a table, column, function or
+# check the server uses: write the next self-host migration, list it here as
+# ported/partial, and run self-host/tests/migrations.sh.
+20260524000000_create_initial_schema.sql	partial	0001,0007: users/workspaces/workspace_members/inboxes/api_keys/activity_log; auth.users trigger, oauth_states, auth_logs and activity_log partitioning are hosted-only
+20260524150000_row_level_security_policies.sql	partial	0016: RLS enabled on every table; the auth.uid() member policies are hosted-only (self-host has no end-user sessions)
+20260524180000_configure_auth_user_provisioning.sql	skipped	Supabase Auth sign-up provisioning; self-host seeds one operator user
+20260524200000_gmail_token_exchange_schema_fixes.sql	ported	0001,0002: credential columns bytea->text; full unique (workspace_id, email_address) is idx_inboxes_workspace_email
+20260525000000_workspaces_soft_delete.sql	partial	0006: workspaces.deleted_at + index; my_workspace_ids() is an auth.uid() RLS helper
+20260525120000_add_get_current_user_sessions_function.sql	skipped	Supabase Auth session listing for the dashboard
+20260525130000_oauth_clients_and_auth_codes.sql	skipped	hosted OAuth authorization server; self-host authenticates with mcpe_ keys
+20260525140000_add_stripe_to_workspaces.sql	skipped	Stripe billing
+20260525200000_fix_user_delete_cascade.sql	partial	0005: api_keys.created_by nullable, ON DELETE SET NULL; workspace cascade is about auth.users deletion
+20260525210000_oauth_auth_codes_challenge_method.sql	skipped	hosted OAuth authorization server
+20260525210001_oauth_refresh_tokens.sql	skipped	hosted OAuth authorization server; the server's lookups of oauth_refresh_tokens fail open or only matter for OAuth-issued keys
+20260525210002_oauth_clients_deactivated_at.sql	skipped	hosted OAuth authorization server
+20260525210003_register_claude_clients.sql	skipped	hosted OAuth client registrations
+20260525220000_oauth_csrf_and_state_nonce_tables.sql	skipped	hosted OAuth/dashboard CSRF state
+20260526000001_activity_log_future_partitions.sql	skipped	monthly partition maintenance via pg_cron; self-host activity_log is a plain table
+20260526000002_rate_limit_buckets.sql	ported	0001,0016: rate_limit_buckets + rate_limit_check(); RLS on, service_role only
+20260526000003_workspace_invites_and_member_roles.sql	partial	0007: workspace_members role check; invites, seat logic and their cron are dashboard features
+20260526000004_enum_check_constraints_retention_and_index.sql	partial	0003,0006,0008: provider/status/plan/activity status checks; oauth checks, pg_cron retention job and oauth index are hosted-only
+20260529000000_oauth_refresh_tokens_api_key_link.sql	skipped	hosted OAuth authorization server
+20260529130000_secure_activity_log_partitions_and_harden_functions.sql	skipped	partition RLS and search_path hardening of hosted partition/cron functions
+20260529130001_revoke_internal_function_execute_from_public.sql	partial	0016: rate_limit_check is service_role only; the other functions do not exist on self-host
+20260530000000_create_workspace_rpc.sql	skipped	dashboard workspace creation; self-host seeds one workspace
+20260530120000_harden_accept_workspace_invite.sql	skipped	dashboard invites
+20260530130000_inboxes_service_column.sql	ported	0001,0003: inboxes.service + check
+20260531000000_workspaces_grandfathered.sql	ported	0001: workspaces.grandfathered (seed workspace is grandfathered)
+20260601000000_add_new_scopes.sql	skipped	updates hosted OAuth client rows; self-host scopes live on the key
+20260601160000_fix_accept_invite_ambiguous_column.sql	skipped	dashboard invites
+20260601170000_accept_invite_race_safe_insert.sql	skipped	dashboard invites
+20260602000000_create_contacts.sql	skipped	table dropped again by 20260603173013
+20260603000001_create_scheduled_sends.sql	partial	0001: scheduled_sends table and indexes; the pg_cron/pg_net dispatcher is replaced by the compose `dispatcher` service
+20260603000002_inboxes_imap_username.sql	ported	0001: inboxes.imap_username
+20260603173013_drop_contacts.sql	skipped	drops a table self-host never had
+20260603202214_revoke_user_session_rpc.sql	skipped	Supabase Auth sessions
+20260603202223_purge_seed_data.sql	skipped	one-off hosted data cleanup
+20260603202232_harden_grants.sql	partial	0016: anon/authenticated have no table access on self-host (no grants, RLS on); the named hosted tables/functions do not exist
+20260604000000_inboxes_fastmail_service.sql	ported	0001,0003: 'fastmail' service value
+20260605000000_widen_dynamic_oauth_client_scopes.sql	skipped	hosted OAuth client rows
+20260606000000_user_level_billing.sql	skipped	Stripe billing
+20260606000001_stripe_webhook_events.sql	skipped	Stripe billing
+20260606000002_create_workspace_gate_user_billing.sql	skipped	dashboard workspace creation + billing
+20260607000000_scheduled_send_dispatch_vault.sql	skipped	pg_cron/Vault dispatcher; replaced by the compose `dispatcher` service
+20260607040000_drop_workspaces_stripe_customer_unique.sql	skipped	Stripe billing
+20260623000000_scheduled_sends_payload_encrypted.sql	ported	0001: scheduled_sends.payload_encrypted
+20260623120000_inboxes_signature_columns.sql	ported	0001: inboxes signature_* columns and checks
+20260708000000_signature_assets_bucket.sql	skipped	Supabase Storage bucket for dashboard signature images
+20260728000000_add_product_analytics_first_use_marker.sql	ported	0006: workspaces.analytics_first_tool_*
+20260802000000_add_truthful_product_funnel_events.sql	ported	0006,0015: product_funnel_events + workspaces.analytics_first_* milestones
+20260802170000_add_workspace_acquisition_attribution.sql	skipped	marketing acquisition attribution (set at web sign-up; never read by the server)
+20260802180000_create_bulk_runs.sql	ported	0011: bulk_runs
+20260802190000_add_outbound_idempotency.sql	ported	0010: outbound_idempotency
+20260802200000_add_send_approvals.sql	ported	0004,0009: inboxes.send_approval_required + send_approvals (auth.uid() policy left out)
+20260802210000_expand_send_approval_operations.sql	ported	0009: send_approvals operation check
+20260802220000_link_idempotency_to_send_approvals.sql	ported	0010: outbound_idempotency.approval_id + status check
+20260803000000_add_activity_log_error_details.sql	ported	0008: activity_log.error_details
+20260803010000_create_action_usage_shadow_meter.sql	ported	0014: action_usage (member policy left out)
+20260803020000_create_user_usage_entitlements.sql	partial	0014: user_usage_entitlements table; audit table/trigger and comped-plan trigger are hosted billing administration
+20260803030000_create_usage_limit_events.sql	skipped	usage-cap enforcement; disabled on self-host (USAGE_ENFORCEMENT_DISABLED=true)
+20260803040000_add_atomic_action_reservations.sql	skipped	usage-cap enforcement; disabled on self-host
+20260803050000_create_workspace_usage_exemptions.sql	skipped	usage-cap enforcement; disabled on self-host
+20260803060000_add_effective_workspace_plan_function.sql	skipped	billing plan resolution for the dashboard
+20260803130000_add_synthetic_monitoring_state.sql	skipped	hosted uptime monitoring
+20260803140000_schedule_synthetic_monitor.sql	skipped	hosted uptime monitoring (pg_cron)
+20260803150000_complete_synthetic_monitor_incidents.sql	skipped	hosted uptime monitoring
+20260803160000_align_action_usage_with_billing_cycles.sql	skipped	usage-cap enforcement + billing cycles
+20260804000000_disable_synthetic_canary_schedule.sql	skipped	hosted uptime monitoring
+20260805010000_add_persistent_onboarding_state.sql	ported	0006,0015: workspaces.onboarding_* + funnel checks (backfill adapted to self-host data)
+20260805090000_expand_privacy_safe_acquisition_attribution.sql	skipped	marketing acquisition attribution
+20260805160000_connection_security_and_diagnostics.sql	ported	0003,0015: inboxes imap/smtp_security (backfilled from port) + funnel phase/connection_type
+20260805170000_add_system_event_notifications.sql	skipped	hosted operator notifications; the server's emit_system_event call is best effort and logs a warning
+20260805180000_create_mcp_client_capabilities.sql	ported	0012: mcp_client_capabilities + identity unique index
+20260805200000_mcp_app_approval_review.sql	ported	0004,0009: send_review_mode, send_approvals decided_via/decided_by_api_key_id/expires_at
+20260805210000_create_bulk_plans.sql	ported	0004,0011: inboxes.bulk_review_mode + bulk_plans
+20260810120000_add_system_notify_threads.sql	skipped	hosted operator notifications
+20260813100000_add_billing_funnel_events.sql	ported	0015: funnel stage/category checks
+20260813140000_growth_analytics_rpcs.sql	skipped	internal growth dashboard
+20260813170000_growth_active_workspaces.sql	skipped	internal growth dashboard
+20260813190000_fix_growth_error_breakdown_consolidated_tools.sql	skipped	internal growth dashboard
+20260819090000_growth_inventory_rpcs.sql	skipped	internal growth dashboard
+20260819120000_workspace_usage_rpcs.sql	skipped	dashboard usage pages
+20260819130000_usage_summary_billing_window.sql	skipped	dashboard usage pages
+20260819140000_growth_metric_definition_fixes.sql	skipped	internal growth dashboard
+20260819150000_record_usage_limit_event_rpc.sql	skipped	usage-cap enforcement; disabled on self-host
+20260819160000_fix_record_usage_limit_event_return.sql	skipped	usage-cap enforcement; disabled on self-host
+20260819170000_create_triage_automations.sql	ported	0013: triage_rules/runs/run_items/seen_messages (created_by -> public.users)
+20260819170500_grandfather_unlimited_inboxes.sql	partial	0014: user_usage_entitlements.unlimited_inboxes; inbox-count plan gating is a dashboard feature
+20260819180000_widen_outbound_idempotency_operations.sql	ported	0010: operation check
+20260819180721_growth_public_tool_name_split_surface.sql	skipped	internal growth dashboard
+20260819190000_schedule_triage_dispatch.sql	skipped	pg_cron/Vault job POSTing to the hosted project; replaced by the compose `dispatcher` service calling /triage-dispatch
+20260825120000_allow_service_role_system_events.sql	skipped	hosted operator notifications
+20260827100000_add_personal_plan.sql	ported	0006,0015: plan check incl. 'personal' + funnel categories
+20260829120000_revenue_counts_exclude_internal.sql	skipped	internal growth dashboard
+20260829200000_growth_revenue_rpcs.sql	skipped	internal growth dashboard
+20260829210000_retention_curve_plus_alias.sql	skipped	internal growth dashboard
+20260829220000_funnel_consent_required_category.sql	ported	0015: funnel error_category check
+20260830120000_idempotency_result_snapshot.sql	ported	0010: outbound_idempotency.result_snapshot
+20260830140000_accept_invite_seat_cap_and_live_workspace.sql	skipped	dashboard invites
+20260901120000_revoke_inbox_grandfather_under_two.sql	skipped	one-off hosted billing data change
+20260901140000_inboxes_gmail_service.sql	ported	0003: 'gmail' service value (Google app password over IMAP)
+20260901160000_growth_people_counts.sql	skipped	internal growth dashboard
+20260902130000_billing_lifecycle_emails.sql	skipped	billing emails; only written when usage caps are enforced
+20260902130100_schedule_billing_lifecycle.sql	skipped	billing emails (pg_cron)
+20260902140000_lifecycle_email_preferences.sql	skipped	marketing/lifecycle email preferences
+20260903120000_experiments.sql	skipped	hosted product experiments
+20260907170000_canonical_signup_count.sql	skipped	internal growth dashboard
+20260908120000_oauth_resource_indicator.sql	skipped	hosted OAuth authorization server
+20260909080000_funnel_auth_reason.sql	ported	0015: product_funnel_events.auth_reason
+20260909120000_growth_user_directory.sql	skipped	internal growth dashboard
+20260909170000_restore_signup_attribution.sql	skipped	Supabase Auth sign-up attribution
+20260909180000_auto_revoke_dormant_oauth_grants.sql	skipped	hosted OAuth authorization server (pg_cron)
+20260912200000_free_action_cap_150.sql	partial	0006,0013: workspaces.free_action_cap_exempt, triage_rules.paused_*; allowance functions are usage-cap enforcement, disabled on self-host
+20260912210000_growth_usage_cap_rpc.sql	skipped	internal growth dashboard
+20260912220000_utilization_bands_respect_free_allowance.sql	skipped	internal growth dashboard
+20260914120000_funnel_plan_change_stages.sql	ported	0015: funnel stage check (billing index left out)
+20260915190000_widen_acquisition_sources.sql	skipped	marketing acquisition attribution
+20260916140000_draft_editor_flag.sql	ported	0006: workspaces.draft_editor_enabled (internal-staff backfill not applicable)
+20260916160000_card_build_notified.sql	ported	0005: api_keys.card_build_notified
+20260916170000_draft_editor_hidden.sql	ported	0004,0006: draft_editor_hidden on inboxes and workspaces
+20260916180000_card_build_notified_comment.sql	skipped	column comment only
+20260917090818_backfill_chatgpt_mislabelled_as_x_twitter.sql	skipped	one-off hosted acquisition data fix
+20260917120000_card_diagnostics_flag.sql	ported	0006: workspaces.card_diagnostics (internal-staff backfill not applicable)
+20260923090000_idempotency_draft_writes.sql	ported	0010: operation check incl. draft writes
+20260925120000_schedule_outlook_token_refresh.sql	skipped	Outlook OAuth refresh (pg_cron); self-host is IMAP/SMTP
+20260926020000_app_errors_in_migrations.sql	skipped	web app error log
+20260929100000_marketing_consent.sql	skipped	marketing consent for web sign-ups
+20260929110000_paywall_followup_ledger.sql	skipped	billing/lifecycle emails
+20260929140000_acquisition_email_segment.sql	partial	0015: funnel stage check; workspaces.acquisition_email_segment is marketing attribution
+20260929190000_acquisition_source_google_ads.sql	skipped	marketing acquisition attribution
+20261002180000_checkout_cancel_feedback.sql	skipped	Stripe checkout feedback table

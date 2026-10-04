@@ -5,9 +5,10 @@
 #   APP_URL=https://mcp.example.com \
 #   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
 #
-# Caddy obtains and renews a publicly trusted certificate automatically. The
-# base compose file still binds port 8787 to loopback, so the MCP server itself
-# is never directly exposed to the network.
+# Caddy obtains and renews a publicly trusted certificate automatically and
+# reaches the MCP server over the private compose network; the server itself
+# publishes no host port in this mode. (Not needed on Coolify, whose proxy
+# already terminates TLS for the domain you assign to mcp-server.)
 services:
   caddy:
     image: caddy:2.8-alpine

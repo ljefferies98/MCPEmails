@@ -1,2 +1,5 @@
 # Generated secrets, never commit.
 .env
+
+# make backup output: contains encrypted mailbox credentials.
+backups/
