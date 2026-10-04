@@ -397,13 +397,21 @@ npx supabase functions deploy mcp-server --project-ref <your-project-ref> --no-v
 > are deliberately read in their own small queries (`readSendReviewMode`, `readBulkReviewMode`,
 > `readInboxDraftEditorHidden`) so an out-of-order deploy degrades that one feature instead of
 > breaking everything — that is a safety net, not a licence to skip the order.
+>
+> **Self-host has its own migrations.** The hosted migrations depend on Supabase Auth, pg_cron and
+> Vault, so self-host applies hand-ported equivalents from `self-host/db/migrations/` (automatically,
+> before the server starts). Every new file in `supabase/migrations/` must be classified in
+> `self-host/db/upstream-migrations.tsv`, and a change to a table the server uses needs a self-host
+> migration too: `self-host/tests/manifest.test.ts` and `self-host/tests/schema-parity.sh` fail
+> until it has one. See [`self-host/README.md`](self-host/README.md#for-contributors-changing-the-schema).
 
 ## Self-hosting
 
 Don't want to trust the hosted service with your mail? Run the **same MCP server** on your own
 machine. [`self-host/`](self-host/) ships a containerized stack (Postgres + PostgREST + the Deno
 server, no Supabase/Stripe/dashboard), so your credentials are encrypted with a key only you hold
-and decrypted only inside your own container.
+and decrypted only inside your own container. Schema migrations run automatically on every start,
+so upgrading is `git pull && make up` (or a redeploy on Coolify) with your data kept.
 
 ```bash
 cd self-host

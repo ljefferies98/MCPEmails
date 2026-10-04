@@ -315,6 +315,66 @@ jobs:
           supabase gen types typescript --local --schema public,graphql_public > apps/web/src/types/database.types.ts
           cd apps/web && npx tsc --noEmit
 
+  # The self-host stack (self-host/), which until this job existed nothing ever
+  # built or ran. Its schema is a separate, hand-ported migration set
+  # (self-host/db/migrations) because supabase/migrations needs Supabase Auth,
+  # pg_cron and Vault. Without these checks the two drifted silently: by
+  # 2026-10 a self-host install from the documented steps rejected every API
+  # key (api_keys.card_build_notified missing) and could not decrypt a single
+  # mailbox password (bytea where the server reads base64url text).
+  #
+  # WHAT THIS CATCHES. (1) An upstream migration nobody classified for
+  # self-host (manifest.test.ts). (2) A table the server queries that no
+  # self-host migration creates. (3) Any column/type/default/check/unique-key
+  # difference from the hosted schema on a table the server uses, against the
+  # database this job builds from supabase/migrations exactly as the `db` job
+  # does (schema-parity.sh; intended differences live in
+  # self-host/db/parity-exceptions.tsv). (4) A migration that breaks a fresh
+  # install, an upgrade from the legacy 00-schema.sql layout, re-application,
+  # or the runner's failure/rollback/checksum behaviour (migrations.sh).
+  # (5) A compose file or Dockerfile that no longer builds.
+  selfhost:
+    name: Self-host (migrations + stack)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # --node-modules-dir=none for the same reason as the `deno` job.
+      - name: Static checks (manifest, server contract, CLI)
+        run: deno test --node-modules-dir=none --allow-read self-host/tests/
+      - name: Compose file is valid
+        working-directory: self-host
+        env:
+          POSTGRES_PASSWORD: ci
+          AUTHENTICATOR_PASSWORD: ci
+          JWT_SECRET: ci
+          SERVICE_ROLE_JWT: ci
+          ENCRYPTION_KEY: ci
+          DISPATCH_SECRET: ci
+        run: docker compose -f docker-compose.yml config -q
+      - name: Images build
+        working-directory: self-host
+        env:
+          POSTGRES_PASSWORD: ci
+          AUTHENTICATOR_PASSWORD: ci
+          JWT_SECRET: ci
+          SERVICE_ROLE_JWT: ci
+          ENCRYPTION_KEY: ci
+          DISPATCH_SECRET: ci
+        run: docker compose -f docker-compose.yml build
+      - name: Migrations (fresh, upgrade, idempotency, failure handling)
+        run: sh self-host/tests/migrations.sh
+      # Same pinned CLI as the `db` job, for the same reason.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.118.0
+      - name: Build the hosted schema from supabase/migrations
+        run: supabase db start
+      - name: Self-host schema matches hosted for every table the server uses
+        run: sh self-host/tests/schema-parity.sh
+
   # THE ONE CHECK PRODUCTION WAITS FOR. The Vercel project's Deployment Checks
   # require this job by name ("CI passed"): Vercel still builds every push to
   # main, but mcpemails.com is not pointed at the new build until this is green.
@@ -330,7 +390,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: always()
-    needs: [audit, typecheck, test, card, deno, build, db]
+    needs: [audit, typecheck, test, card, deno, build, db, selfhost]
     runs-on: ubuntu-latest
     steps:
       - name: Every job succeeded

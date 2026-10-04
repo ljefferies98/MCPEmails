@@ -1,16 +1,21 @@
-# Postgres image with the self-host schema baked in.
+# MCP Emails self-host, schema migration image.
 #
-# We bake the init scripts into the image rather than bind-mounting them so the
-# stack behaves identically on Linux and macOS, macOS bind mounts are often
-# `noexec` and report files as executable, which makes the postgres entrypoint
-# try (and fail) to exec a shell init script. On the image's own filesystem
-# there is no such ambiguity.
+# Runs self-host/db/migrate.sh against the `db` service. It is the same
+# postgres:16-alpine image the database runs, so psql always matches the
+# server, and nothing beyond busybox + psql is needed.
+#
+# The database itself runs the stock image with NO init scripts: the schema is
+# created and upgraded only by this runner, so a fresh volume and a years-old
+# volume go through exactly the same, recorded, steps.
 FROM postgres:16-alpine
 
-# Schema first, then the role-password script (lexical order = run order).
-COPY 00-schema.sql /docker-entrypoint-initdb.d/00-schema.sql
-COPY 01-roles.sh   /docker-entrypoint-initdb.d/01-roles.sh
+COPY migrate.sh /usr/local/bin/mcpe-migrate
+COPY migrations/ /migrations/
+RUN chmod 0755 /usr/local/bin/mcpe-migrate \
+ && chmod -R a+rX /migrations
 
-# Strip the execute bit so the postgres entrypoint *sources* the script (`. file`)
-# instead of exec'ing it, no dependency on the shebang or interpreter path.
-RUN chmod -x /docker-entrypoint-initdb.d/01-roles.sh
+# Never run as root; the runner only needs to talk to the network.
+USER postgres
+
+ENTRYPOINT ["/usr/local/bin/mcpe-migrate"]
+CMD ["apply"]

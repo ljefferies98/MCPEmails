@@ -1,0 +1,13 @@
+# Local-machine defaults, merged automatically by `docker compose` (and `make`)
+# when you run it from this directory without `-f`.
+#
+# Publishes the MCP server on 127.0.0.1 only, so its bearer-token endpoint is
+# reachable from this machine but not from the LAN or the internet.
+#
+# Platforms that pass the compose file explicitly (`-f docker-compose.yml`,
+# which is what Coolify does) do not load this file, so no host port is
+# published there and the platform's proxy routes the domain to port 8000.
+services:
+  mcp-server:
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8787}:8000"

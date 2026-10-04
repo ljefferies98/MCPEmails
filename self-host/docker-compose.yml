@@ -1,67 +1,104 @@
 # ============================================================
 # MCP Emails, self-host stack
 # ============================================================
-# Four small services, no Supabase/Stripe/Next.js:
+# Start-up order (each step waits for the previous one to be healthy):
 #
-#   db        Postgres 16, schema applied on first boot
-#   postgrest PostgREST, the REST layer supabase-js speaks to
-#   gateway   nginx, exposes PostgREST under /rest/v1/
-#   mcp-server the Deno MCP server (the same code as mcpemails.com)
+#   db          Postgres 16, data in the named volume `pgdata`
+#    └ migrate  applies self-host/db/migrations, recorded in
+#               selfhost.schema_migrations; the stack goes no further
+#               if a migration fails
+#       ├ postgrest   REST layer the server talks to (supabase-js)
+#       │  └ gateway  nginx, serves PostgREST under /rest/v1/
+#       └ mcp-server  the Deno MCP server, listening on :8000   <- expose this
+#          └ dispatcher  flushes scheduled sends + runs automations every minute
 #
-# Optional (profile "scheduler"):
-#   dispatcher polls POST /dispatch every minute to flush scheduled sends
+# Tools (profile "tools", run on demand with `docker compose run`):
+#   cli         the provisioning CLI (inboxes, API keys)
 #
-# Tools (profile "tools", run on demand via `docker compose run`):
-#   cli       the provisioning CLI (inboxes, API keys)
+# Nothing is published on a host port here. Locally, docker-compose.override.yml
+# (picked up automatically by `docker compose` / `make`) binds the MCP server to
+# 127.0.0.1:8787. On Coolify, assign the domain to the `mcp-server` service
+# with port 8000. See README.md.
 #
-# All secrets come from .env (generate it with `make setup`).
+# Secrets come from .env (`make setup`) or from the platform's env settings.
 # ============================================================
 
 name: mcpemails-selfhost
 
 services:
   db:
-    build:
-      context: ./db
-      dockerfile: Dockerfile
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      AUTHENTICATOR_PASSWORD: ${AUTHENTICATOR_PASSWORD:?set AUTHENTICATOR_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
       timeout: 5s
-      retries: 10
-    # Not published to the host by default, the DB stays on the internal
-    # network. Uncomment to inspect with psql from the host.
-    # ports:
-    #   - "5432:5432"
+      retries: 20
 
-  postgrest:
-    image: postgrest/postgrest:v12.2.3
+  migrate:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    # Long-running on purpose: it applies migrations, reports healthy, then
+    # idles. Dependants wait for `service_healthy`, and platforms that flag an
+    # exited container as a failed deployment (Coolify) see it as running. If a
+    # migration fails the container exits non-zero and nothing after it starts.
+    command: ["serve"]
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     environment:
-      PGRST_DB_URI: postgres://authenticator:${AUTHENTICATOR_PASSWORD}@db:5432/postgres
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGDATABASE: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      AUTHENTICATOR_PASSWORD: ${AUTHENTICATOR_PASSWORD:?set AUTHENTICATOR_PASSWORD}
+      MIGRATIONS_ALLOW_CHANGED: ${MIGRATIONS_ALLOW_CHANGED:-false}
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/migrations-complete"]
+      interval: 3s
+      timeout: 3s
+      # Generous: a large upgrade may take a while. A failed migration does
+      # not wait this out, the container exits immediately.
+      retries: 400
+
+  postgrest:
+    image: postgrest/postgrest:v12.2.3
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${AUTHENTICATOR_PASSWORD:?set AUTHENTICATOR_PASSWORD}@db:5432/postgres
       PGRST_DB_SCHEMAS: public
       PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      PGRST_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUCS: "false"
+      # /live and /ready for the gateway's health endpoint. Internal only.
+      PGRST_ADMIN_SERVER_PORT: "3001"
 
   gateway:
-    image: nginx:1.27-alpine
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       - postgrest
-    volumes:
-      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      # Proxies PostgREST's /ready: healthy = PostgREST is connected and has
+      # loaded the (migrated) schema.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
   mcp-server:
     build:
@@ -69,38 +106,53 @@ services:
       dockerfile: self-host/Dockerfile
     restart: unless-stopped
     depends_on:
-      - gateway
+      migrate:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
     environment:
       SUPABASE_URL: http://gateway
-      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_JWT:?set SERVICE_ROLE_JWT in .env}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_JWT:?set SERVICE_ROLE_JWT}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (64 hex chars; never change it once inboxes exist)}
+      DISPATCH_SECRET: ${DISPATCH_SECRET:?set DISPATCH_SECRET}
+      # Public base URL of this server, used in reconnect/review links.
       APP_URL: ${APP_URL:-http://localhost:8787}
-      DISPATCH_SECRET: ${DISPATCH_SECRET:-}
+      # Self-host has no plans or billing: skip the hosted usage-allowance
+      # checks (those database functions are intentionally not installed).
+      USAGE_ENFORCEMENT_DISABLED: ${USAGE_ENFORCEMENT_DISABLED:-true}
       # Optional non-AWS egress for hosts that refuse cloud submission. Empty
       # means every host is dialled directly, which is what a self-hosted
       # deployment on its own address normally wants. See docs/smtp-relay.md.
       SMTP_RELAY_URL: ${SMTP_RELAY_URL:-}
       SMTP_RELAY_HOSTS: ${SMTP_RELAY_HOSTS:-}
-    ports:
-      # Keep bearer-token traffic on this machine by default. For remote access,
-      # use docker-compose.tls.yml rather than publishing this port directly.
-      - "127.0.0.1:${MCP_PORT:-8787}:8000"
+    # Internal port. Route your public domain here (Coolify: the mcp-server
+    # service, port 8000). Do not publish it without TLS in front.
+    expose:
+      - "8000"
+    healthcheck:
+      # The server answers OPTIONS on any path without auth or a database call.
+      test: ["CMD", "deno", "eval", "const r = await fetch('http://127.0.0.1:8000/', { method: 'OPTIONS' }); Deno.exit(r.status < 500 ? 0 : 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   dispatcher:
     image: curlimages/curl:8.11.1
     restart: unless-stopped
-    profiles: ["scheduler"]
     depends_on:
-      - mcp-server
+      mcp-server:
+        condition: service_healthy
     environment:
-      DISPATCH_SECRET: ${DISPATCH_SECRET:-}
-    # Flush due scheduled sends once a minute. Replaces the hosted product's
-    # pg_cron + pg_net + Vault dispatcher with a tiny external poll.
+      DISPATCH_SECRET: ${DISPATCH_SECRET:?set DISPATCH_SECRET}
+    # Once a minute: flush due scheduled sends (/dispatch) and run due
+    # automations (/triage-dispatch). Replaces the hosted product's pg_cron +
+    # pg_net + Vault jobs. Non-2xx responses are logged; the loop keeps going.
     # Single-line script: a folded (>) block would keep newlines on the
-    # more-indented curl args and split the command in the shell.
+    # more-indented lines and split the command in the shell.
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'while true; do curl -fsS -X POST -H "X-Dispatch-Secret: $${DISPATCH_SECRET}" http://mcp-server:8000/dispatch >/dev/null 2>&1 || true; sleep 60; done'
+      - 'while true; do for p in dispatch triage-dispatch; do c=$$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "X-Dispatch-Secret: $${DISPATCH_SECRET}" "http://mcp-server:8000/$$p" 2>&1); case "$$c" in 2??) ;; *) echo "dispatcher: /$$p -> $$c";; esac; done; sleep 60; done'
 
   cli:
     build:
@@ -111,7 +163,10 @@ services:
       SUPABASE_URL: http://gateway
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_JWT:-}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
-    entrypoint: ["deno", "run", "--allow-net", "--allow-env", "cli/mcpe.ts"]
+      PGHOST: db
+      PGUSER: postgres
+      PGDATABASE: postgres
+    entrypoint: ["mcpe"]
 
 volumes:
   pgdata:

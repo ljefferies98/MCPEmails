@@ -5,6 +5,7 @@
 // Subcommands:
 //   gen-secrets                 Print a ready-to-use .env (run once, on the host)
 //   provision-inbox  [flags]    Connect an IMAP/SMTP mailbox (creds encrypted at rest)
+//   set-security     [flags]    Change an inbox's IMAP/SMTP TLS mode (no password needed)
 //   create-key       [flags]    Mint a scoped MCP API key (printed once)
 //   list-inboxes                List connected inboxes
 //   list-keys                   List active API keys (prefixes only)
@@ -18,7 +19,8 @@
 const SEED_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 const SEED_USER_ID = "00000000-0000-0000-0000-000000000001";
 
-const ALL_SCOPES = [
+// Granted when create-key is given no --scopes (unchanged since launch).
+const DEFAULT_SCOPES = [
   "read:email",
   "send:email",
   "manage:folders",
@@ -28,7 +30,55 @@ const ALL_SCOPES = [
   "schedule:email",
 ];
 
-const VALID_SERVICES = ["icloud", "yahoo", "zoho", "yandex", "generic", "fastmail"];
+// Everything the server understands. manage:automations lets a key create
+// rules that act on mail unattended, so it is only granted when asked for.
+const ALL_SCOPES = [...DEFAULT_SCOPES, "search:email", "manage:automations"];
+
+const VALID_SERVICES = ["icloud", "yahoo", "zoho", "yandex", "generic", "fastmail", "gmail"];
+
+// How the server opens each connection (inboxes.imap_security / smtp_security):
+//   "tls"       implicit TLS from the first byte    (IMAP 993, SMTP 465)
+//   "starttls"  plain connect, then STARTTLS        (IMAP 143, SMTP 587/25)
+// The server uses the stored value as-is, whatever the port, so it must match
+// what the provider listens for on that port: TLS on a STARTTLS port (or the
+// reverse) hangs until the connection times out.
+const SECURITY_MODES = ["tls", "starttls"] as const;
+type SecurityMode = typeof SECURITY_MODES[number];
+const IMAP_PORT_SECURITY: Record<number, SecurityMode> = { 993: "tls", 143: "starttls" };
+const SMTP_PORT_SECURITY: Record<number, SecurityMode> = { 465: "tls", 587: "starttls", 25: "starttls" };
+
+/**
+ * The TLS mode for a connection: the explicit flag if given, otherwise the
+ * standard mode for a well-known port. A non-standard port without a flag is
+ * an error rather than a guess, because a wrong guess fails as a timeout.
+ */
+export function resolveSecurity(
+  proto: "imap" | "smtp",
+  port: number,
+  flag: string | undefined,
+): SecurityMode {
+  if (flag !== undefined && flag !== "true") {
+    const mode = flag.toLowerCase();
+    if (!(SECURITY_MODES as readonly string[]).includes(mode)) {
+      throw new Error(`--${proto}-security must be one of: ${SECURITY_MODES.join(", ")}`);
+    }
+    return mode as SecurityMode;
+  }
+  const byPort = (proto === "imap" ? IMAP_PORT_SECURITY : SMTP_PORT_SECURITY)[port];
+  if (!byPort) {
+    throw new Error(
+      `${proto.toUpperCase()} port ${port} is not a standard port; say how to connect with ` +
+        `--${proto}-security tls (implicit TLS) or --${proto}-security starttls`,
+    );
+  }
+  return byPort;
+}
+
+export function parsePort(label: string, raw: string): number {
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`${label} must be a port number, got "${raw}"`);
+  return port;
+}
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
@@ -63,7 +113,7 @@ async function sha256Hex(s: string): Promise<string> {
   return bytesToHex(new Uint8Array(digest));
 }
 
-/** Mint an HS256 JWT, used to produce the PostgREST service_role / anon tokens. */
+/** Mint an HS256 JWT, used to produce the PostgREST service_role token. */
 async function signJwt(secret: string, payload: Record<string, unknown>): Promise<string> {
   const header = { alg: "HS256", typ: "JWT" };
   const enc = (o: unknown) => base64url(textToBytes(JSON.stringify(o)));
@@ -158,10 +208,11 @@ async function cmdGenSecrets() {
   const jwtSecret = randomHex(40); // 80 hex chars, comfortably > 32 bytes for HS256
   const iat = 0; // fixed (no Date.now in some sandboxes); these are long-lived service tokens
   const serviceJwt = await signJwt(jwtSecret, { role: "service_role", iss: "mcpemails-selfhost", iat });
-  const anonJwt = await signJwt(jwtSecret, { role: "anon", iss: "mcpemails-selfhost", iat });
 
   const env = `# ============================================================
 # MCP Emails self-host, generated secrets. KEEP THIS FILE PRIVATE.
+# Use it as .env next to docker-compose.yml, or paste the values into your
+# platform's environment settings (Coolify: Environment Variables).
 # Regenerating ENCRYPTION_KEY makes already-stored credentials undecryptable.
 # ============================================================
 
@@ -172,20 +223,18 @@ AUTHENTICATOR_PASSWORD=${randomHex(24)}
 # PostgREST JWT signing secret + the service_role token the MCP server presents
 JWT_SECRET=${jwtSecret}
 SERVICE_ROLE_JWT=${serviceJwt}
-ANON_JWT=${anonJwt}
 
 # AES-256-GCM key for credentials at rest (64 hex chars, never change after first inbox)
 ENCRYPTION_KEY=${randomHex(32)}
 
-# Secret guarding the POST /dispatch scheduled-send flush
+# Secret guarding POST /dispatch and /triage-dispatch (scheduled sends, automations)
 DISPATCH_SECRET=${randomHex(32)}
 
-# Public base URL of this server (used only for reconnect links in errors).
-# For the optional TLS proxy, set it to https://<your DNS name>.
+# Public base URL of this server (used in links inside responses).
+# Behind Coolify or another HTTPS proxy: https://<your MCP domain>
 APP_URL=http://localhost:8787
 
-# Host port the MCP server listens on -> http://localhost:<MCP_PORT>.
-# It binds to 127.0.0.1 only and is not exposed to the LAN/internet.
+# Local only: loopback port -> http://localhost:<MCP_PORT>. Ignored by Coolify.
 MCP_PORT=8787
 `;
   // Print to stdout so the caller can inspect or redirect (`> .env`).
@@ -207,8 +256,15 @@ async function cmdProvisionInbox(flags: Record<string, string | string[]>) {
   if (!imapHost || imapHost === "true") die("--imap-host is required");
   if (!smtpHost || smtpHost === "true") die("--smtp-host is required");
 
-  const imapPort = parseInt((flags["imap-port"] as string) ?? "993", 10);
-  const smtpPort = parseInt((flags["smtp-port"] as string) ?? "465", 10);
+  let imapPort: number, smtpPort: number, imapSecurity: SecurityMode, smtpSecurity: SecurityMode;
+  try {
+    imapPort = parsePort("--imap-port", (flags["imap-port"] as string) ?? "993");
+    smtpPort = parsePort("--smtp-port", (flags["smtp-port"] as string) ?? "465");
+    imapSecurity = resolveSecurity("imap", imapPort, flags["imap-security"] as string | undefined);
+    smtpSecurity = resolveSecurity("smtp", smtpPort, flags["smtp-security"] as string | undefined);
+  } catch (e) {
+    die((e as Error).message);
+  }
 
   // Prefer IMAP_PASSWORD from the environment so it stays out of shell history.
   const password = Deno.env.get("IMAP_PASSWORD") ?? (flags.password as string | undefined);
@@ -234,10 +290,12 @@ async function cmdProvisionInbox(flags: Record<string, string | string[]>) {
       imap_host: imapHost,
       imap_port: imapPort,
       imap_tls: true,
+      imap_security: imapSecurity,
       imap_username: username,
       smtp_host: smtpHost,
       smtp_port: smtpPort,
       smtp_tls: true,
+      smtp_security: smtpSecurity,
       imap_password: encrypted,
       oauth_access_token: null,
       oauth_refresh_token: null,
@@ -250,13 +308,46 @@ async function cmdProvisionInbox(flags: Record<string, string | string[]>) {
     { onConflict: "workspace_id, email_address", ignoreDuplicates: false },
   );
   if (error) die(`failed to save inbox: ${error.message}`);
-  console.log(`✓ connected ${email} (${service}, imap ${imapHost}:${imapPort} / smtp ${smtpHost}:${smtpPort})`);
+  console.log(
+    `✓ connected ${email} (${service}, imap ${imapHost}:${imapPort} ${imapSecurity} / smtp ${smtpHost}:${smtpPort} ${smtpSecurity})`,
+  );
+}
+
+async function cmdSetSecurity(flags: Record<string, string | string[]>) {
+  const ref = flags.inbox as string | undefined;
+  if (!ref || ref === "true") die("--inbox <email|id> is required");
+  const patch: Record<string, string> = {};
+  for (const proto of ["imap", "smtp"] as const) {
+    const flag = flags[`${proto}-security`] as string | undefined;
+    if (flag === undefined) continue;
+    try {
+      patch[`${proto}_security`] = resolveSecurity(proto, 0, flag);
+    } catch (e) {
+      die((e as Error).message);
+    }
+  }
+  if (!Object.keys(patch).length) die("give --imap-security and/or --smtp-security (tls | starttls)");
+
+  const supabase = await getClient();
+  const isId = /^[0-9a-f-]{36}$/i.test(ref);
+  const { data, error } = await supabase
+    .from("inboxes")
+    .update(patch)
+    .eq("workspace_id", SEED_WORKSPACE_ID)
+    .eq(isId ? "id" : "email_address", ref)
+    .is("deleted_at", null)
+    .select("email_address, imap_port, imap_security, smtp_port, smtp_security");
+  if (error) die(error.message);
+  if (!data?.length) die(`no connected inbox matches "${ref}"`);
+  for (const r of data) {
+    console.log(`✓ ${r.email_address}: imap ${r.imap_port} ${r.imap_security} / smtp ${r.smtp_port} ${r.smtp_security}`);
+  }
 }
 
 async function cmdCreateKey(flags: Record<string, string | string[]>) {
   const name = (flags.name as string | undefined) && flags.name !== "true" ? (flags.name as string) : "self-host key";
 
-  let scopes = ALL_SCOPES;
+  let scopes = DEFAULT_SCOPES;
   if (flags.scopes && flags.scopes !== "true") {
     scopes = (flags.scopes as string).split(",").map((s) => s.trim()).filter(Boolean);
     const bad = scopes.filter((s) => !ALL_SCOPES.includes(s));
@@ -321,7 +412,7 @@ async function cmdListInboxes() {
   const supabase = await getClient();
   const { data, error } = await supabase
     .from("inboxes")
-    .select("id, email_address, provider, service, status, imap_host, created_at")
+    .select("id, email_address, provider, service, status, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, created_at")
     .eq("workspace_id", SEED_WORKSPACE_ID)
     .is("deleted_at", null)
     .order("created_at", { ascending: true });
@@ -331,7 +422,11 @@ async function cmdListInboxes() {
     return;
   }
   for (const r of data) {
-    console.log(`${r.email_address}\t${r.provider}/${r.service ?? "-"}\t${r.status}\t${r.imap_host ?? ""}\t${r.id}`);
+    console.log(
+      `${r.email_address}\t${r.provider}/${r.service ?? "-"}\t${r.status}\t` +
+        `imap ${r.imap_host ?? "-"}:${r.imap_port ?? "-"} ${r.imap_security}\t` +
+        `smtp ${r.smtp_host ?? "-"}:${r.smtp_port ?? "-"} ${r.smtp_security}\t${r.id}`,
+    );
   }
 }
 
@@ -371,49 +466,64 @@ async function cmdRevokeKey(prefix: string | undefined) {
 
 // ── dispatch ─────────────────────────────────────────────────────────────────
 
-const [cmd, ...rest] = Deno.args;
-const flags = parseFlags(rest);
+async function main() {
+  const [cmd, ...rest] = Deno.args;
+  const flags = parseFlags(rest);
 
-switch (cmd) {
-  case "gen-secrets":
-    await cmdGenSecrets();
-    break;
-  case "provision-inbox":
-    await cmdProvisionInbox(flags);
-    break;
-  case "create-key":
-    await cmdCreateKey(flags);
-    break;
-  case "list-inboxes":
-    await cmdListInboxes();
-    break;
-  case "list-keys":
-    await cmdListKeys();
-    break;
-  case "revoke-key":
-    await cmdRevokeKey(rest[0]);
-    break;
-  default:
-    console.log(`mcpe, MCP Emails self-host CLI
+  switch (cmd) {
+    case "gen-secrets":
+      await cmdGenSecrets();
+      break;
+    case "provision-inbox":
+      await cmdProvisionInbox(flags);
+      break;
+    case "set-security":
+      await cmdSetSecurity(flags);
+      break;
+    case "create-key":
+      await cmdCreateKey(flags);
+      break;
+    case "list-inboxes":
+      await cmdListInboxes();
+      break;
+    case "list-keys":
+      await cmdListKeys();
+      break;
+    case "revoke-key":
+      await cmdRevokeKey(rest[0]);
+      break;
+    default:
+      console.log(`mcpe, MCP Emails self-host CLI
 
-Usage: mcpe <command> [flags]
+  Usage: mcpe <command> [flags]
 
-Commands:
-  gen-secrets                              Print a fresh .env to stdout
-  provision-inbox --email <addr> \\
-      --imap-host <h> --smtp-host <h> \\
-      [--imap-port 993] [--smtp-port 465] \\
-      [--username <u>] [--service generic] \\
-      [--display-name <n>]                 Connect an IMAP/SMTP mailbox
-                                           (password via IMAP_PASSWORD env)
-  create-key [--name <n>] [--scopes a,b] \\
-      [--inbox <addr|id> ...] \\
-      [--expires-days <n>]                 Mint a scoped MCP API key
-  list-inboxes                             List connected inboxes
-  list-keys                                List active API keys
-  revoke-key <key_prefix>                  Revoke an API key
+  Commands:
+    gen-secrets                              Print a fresh .env to stdout
+    provision-inbox --email <addr> \\
+        --imap-host <h> --smtp-host <h> \\
+        [--imap-port 993] [--smtp-port 465] \\
+        [--imap-security tls|starttls] \\
+        [--smtp-security tls|starttls] \\
+        [--username <u>] [--service generic] \\
+        [--display-name <n>]                 Connect an IMAP/SMTP mailbox
+                                             (password via IMAP_PASSWORD env;
+                                             security defaults from the port:
+                                             993/465 tls, 143/587/25 starttls)
+    set-security --inbox <addr|id> \\
+        [--imap-security tls|starttls] \\
+        [--smtp-security tls|starttls]       Change an inbox's TLS mode
+    create-key [--name <n>] [--scopes a,b] \\
+        [--inbox <addr|id> ...] \\
+        [--expires-days <n>]                 Mint a scoped MCP API key
+    list-inboxes                             List connected inboxes
+    list-keys                                List active API keys
+    revoke-key <key_prefix>                  Revoke an API key
 
-Valid scopes: ${ALL_SCOPES.join(", ")}
-Valid services: ${VALID_SERVICES.join(", ")}`);
-    if (cmd && cmd !== "help" && cmd !== "--help") Deno.exit(1);
+  Valid scopes: ${ALL_SCOPES.join(", ")}
+  Valid services: ${VALID_SERVICES.join(", ")}`);
+      if (cmd && cmd !== "help" && cmd !== "--help") Deno.exit(1);
+  }
 }
+
+// Importable for tests without running a command.
+if (import.meta.main) await main();
