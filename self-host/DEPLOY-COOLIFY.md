@@ -176,8 +176,7 @@ mcpe provision-inbox --email you@yourcompany.example \
   --service generic --display-name "Ops"
 ```
 
-Example for Migadu: `--imap-host imap.migadu.com --smtp-host smtp.migadu.com`. Use SMTP port 587
-if 465 is blocked from your server.
+For Migadu, see [Migadu mailboxes](#migadu-mailboxes) below.
 
 The TLS mode follows the port: 993 and 465 use implicit TLS, 143, 587 and 25 use STARTTLS. For any
 other port, pass `--imap-security` / `--smtp-security` (`tls` or `starttls`). Running the command
@@ -191,6 +190,55 @@ mcpe create-key --name "company agent" \
 ```
 
 The key is printed once. Copy it then.
+
+### Migadu mailboxes
+
+| Setting | Value |
+| --- | --- |
+| IMAP server | `imap.migadu.com`, port **993**, implicit TLS (SSL/TLS) |
+| SMTP server | `smtp.migadu.com`, port **587** with STARTTLS, or port **465** with implicit TLS |
+| Username | the **full email address** (the default, so no `--username` needed) |
+| Password | the **mailbox password** set in Migadu's admin panel |
+| `--service` | `generic` |
+
+Use **port 587** unless you know 465 works from your server. Some VPS hosts block or filter outbound
+465, and a blocked port does not fail cleanly: sends hang until they time out. Test from the server
+with `nc -vz smtp.migadu.com 465` and `nc -vz smtp.migadu.com 587`.
+
+In the **`mcp-server`** Terminal, once per mailbox:
+
+```sh
+read -rs IMAP_PASSWORD; export IMAP_PASSWORD
+
+mcpe provision-inbox --email you@yourcompany.example \
+  --imap-host imap.migadu.com --imap-port 993 \
+  --smtp-host smtp.migadu.com --smtp-port 587 \
+  --service generic --display-name "Your Name"
+```
+
+Expected result:
+
+```
+✓ connected you@yourcompany.example (generic, imap imap.migadu.com:993 tls / smtp smtp.migadu.com:587 starttls)
+```
+
+The CLI picks the TLS mode from the ports: 993 uses implicit TLS and 587 uses STARTTLS, so no
+`--*-security` flags are needed. If you would rather use 465, pass `--smtp-port 465`; that selects
+implicit TLS.
+
+To provision several Migadu mailboxes, run `read -rs …` and `provision-inbox` once for each address,
+then mint a key covering all of them with repeated `--inbox` flags (above).
+
+Migadu notes:
+
+- **Sending as an alias or identity:** mail goes out from the address you provisioned. To send from
+  another address on the same domain, set it up as an identity on that mailbox in Migadu first;
+  Migadu may refuse a sender address the mailbox is not allowed to use.
+- **Changing a mailbox password in Migadu:** run the same `provision-inbox` command again with the
+  new password. The mailbox is updated in place, and keys that include it keep working.
+- **An existing mailbox shows `smtp 587 tls`** in `mcpe list-inboxes` (possible after migrating
+  from an older install): fix it with
+  `mcpe set-security --inbox you@yourcompany.example --smtp-security starttls`.
 
 ## 12. Upgrading later
 

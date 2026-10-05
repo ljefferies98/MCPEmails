@@ -209,12 +209,16 @@ mailboxes, run it once per address.
 | Zoho | `zoho` | `imap.zoho.com` | `smtp.zoho.com` | 993 / 465 |
 | Yandex | `yandex` | `imap.yandex.com` | `smtp.yandex.com` | 993 / 465 |
 | Gmail (app password) | `gmail` | `imap.gmail.com` | `smtp.gmail.com` | 993 / 465 |
+| Migadu | `generic` | `imap.migadu.com` | `smtp.migadu.com` | 993 / 587 (or 465) |
 | Any IMAP host | `generic` | *your host* | *your host* | usually 993 / 465 or 587 |
 
-All of these require an **app-specific password** (not your login password) and IMAP/SMTP access
-enabled in the provider's settings.
+Most of these require an **app-specific password** (not your login password) and IMAP/SMTP access
+enabled in the provider's settings. Hosts that issue per-mailbox passwords, such as Migadu, use that
+mailbox password instead.
 
-**Example: a generic host where port 465 is blocked (e.g. Migadu from some VPS providers).**
+**Example: Migadu, using SMTP 587** (recommended where outbound 465 is blocked or hangs). Username
+is the full address; the password is the mailbox password. Full notes are in
+[DEPLOY-COOLIFY.md](DEPLOY-COOLIFY.md#migadu-mailboxes).
 
 ```sh
 IMAP_PASSWORD='mailbox-password' mcpe provision-inbox --email ops@yourcompany.example \
