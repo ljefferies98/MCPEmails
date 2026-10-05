@@ -20,8 +20,19 @@
  * A faithful Node reference lives at apps/web/src/lib/email/imap.ts.
  */
 
-import { previewFromBodyPartSource } from "./text-extract.ts";
+import { bytesToByteString } from "./byte-string.ts";
+import { decodeRawHeaderOctets } from "./mime.ts";
+import {
+  cleanPreviewFromBodyPart,
+  type PreviewPartInfo,
+} from "./text-extract.ts";
 import { connectGuardedTcp } from "./host-guard.ts";
+import {
+  firstPartyContext,
+  summaryPreviewItem,
+  summaryReferencesItem,
+  wantsThreadHeaders,
+} from "./first-party.ts";
 import { decodeModifiedUtf7, encodeModifiedUtf7 } from "./utf7.ts";
 import { parseCopyUid } from "./imap-copyuid.ts";
 import {
@@ -230,6 +241,8 @@ export interface ImapEnvelope {
   to: ImapAddress[];
   date: string;
   messageId: string;
+  /** ENVELOPE's in-reply-to field, verbatim; "" when NIL. */
+  inReplyTo?: string;
 }
 
 export interface ImapMessageSummary {
@@ -239,6 +252,19 @@ export interface ImapMessageSummary {
   hasAttachments: boolean;
   /** Best-effort plain-text preview (≤200 chars); "" when unavailable. */
   preview: string;
+  /**
+   * The raw `References:` header block. Present only when the FETCH asked for
+   * it, which only a client-api call does (`summaryReferencesItem`).
+   */
+  referencesHeader?: string;
+  /**
+   * Gmail's X-GM-THRID / X-GM-MSGID (decimal strings) and X-GM-LABELS. Present
+   * only when the FETCH asked for them, which only a client-api call on a
+   * server advertising X-GM-EXT-1 does (`gmailSummaryItems`).
+   */
+  gmThreadId?: string;
+  gmMessageId?: string;
+  gmLabels?: string[];
 }
 
 export interface ImapRawMessage {
@@ -478,7 +504,6 @@ export class ImapClient {
   private readonly timing: ImapCallTimings | null = currentImapTimings();
   /** Bytes read off the socket so far. Feeds `fetch_bytes`. */
   private bytesRead = 0;
-  private readonly decoder = new TextDecoder("latin1");
   private readonly encoder = new TextEncoder();
 
   /**
@@ -579,6 +604,17 @@ export class ImapClient {
    * `imap_auth_failed`.
    */
   static async connect(cfg: ImapConnectConfig): Promise<ImapClient> {
+    // client-api only (see first-party.ts): its session pool may answer with a
+    // connection it already holds. The store is never opened for an MCP
+    // request, so there this is one undefined read and the dial below runs
+    // exactly as it always has.
+    const pooled = firstPartyContext.getStore()?.imapConnect;
+    if (pooled) return await pooled(cfg, () => ImapClient.dial(cfg));
+    return await ImapClient.dial(cfg);
+  }
+
+  /** The dial {@link connect} has always performed: timed connect-with-retry. */
+  private static async dial(cfg: ImapConnectConfig): Promise<ImapClient> {
     const timing = currentImapTimings();
     if (timing === null) return await ImapClient.connectWithRetry(cfg, null);
     const startedMs = imapClockMs();
@@ -697,7 +733,7 @@ export class ImapClient {
     // Server greeting: expect "* OK ...". A "* BYE" (or any non-OK greeting)
     // carrying a connection-limit marker means the account is over its cap —
     // retryable. Other non-OK greetings are a protocol error.
-    const greeting = await client.readLine();
+    const greeting = serverText(await client.readLine());
     if (!greeting.startsWith("* OK")) {
       client.close();
       if (isConnectionLimitResponse(greeting)) {
@@ -738,7 +774,15 @@ export class ImapClient {
       // rather than at the greeting (text like [OVERQUOTA]/[UNAVAILABLE]/
       // "too many connections"). Treat those as retryable; everything else is
       // a genuine credential failure.
-      if (isConnectionLimitResponse(resp.text)) {
+      //
+      // client-api only: a refusal that carries [AUTHENTICATIONFAILED] is
+      // about the credentials whatever else its text says, so it is not
+      // retried (15 s of back-off in front of a person, and two more failed
+      // logins against a mailbox that may lock). The store is never open for
+      // an MCP request, so there the classification is what it always was.
+      const definitive = firstPartyContext.getStore() !== undefined &&
+        /\[AUTHENTICATIONFAILED\]/i.test(resp.text);
+      if (!definitive && isConnectionLimitResponse(resp.text)) {
         throw new ImapConnectionLimitError(
           `IMAP connection refused at auth: ${text}`,
         );
@@ -829,7 +873,7 @@ export class ImapClient {
         if (line.startsWith(`${tag} `)) {
           const m = /^\S+\s+(OK|NO|BAD)\s*(.*)$/.exec(line);
           return {
-            resp: { status: (m?.[1] as "OK" | "NO" | "BAD") ?? "BAD", text: m?.[2] ?? line },
+            resp: { status: (m?.[1] as "OK" | "NO" | "BAD") ?? "BAD", text: serverText(m?.[2] ?? line) },
             sent: "",
           };
         }
@@ -860,7 +904,7 @@ export class ImapClient {
       if (!cont.startsWith("+")) {
         this.close();
         throw new ImapAuthError(
-          `IMAP server refused SASL PLAIN: ${redactImapAuthText(cont.slice(0, 120), [username, password, token])}`,
+          `IMAP server refused SASL PLAIN: ${redactImapAuthText(serverText(cont).slice(0, 120), [username, password, token])}`,
         );
       }
       await this.write(`${token}${CRLF}`);
@@ -1103,7 +1147,7 @@ export class ImapClient {
       if (line.startsWith("+")) return null;
       if (line.startsWith(`${tag} `)) {
         const m = /^\S+\s+(OK|NO|BAD)\s*(.*)$/.exec(line);
-        return { status: (m?.[1] as "OK" | "NO" | "BAD") ?? "BAD", text: m?.[2] ?? line };
+        return { status: (m?.[1] as "OK" | "NO" | "BAD") ?? "BAD", text: serverText(m?.[2] ?? line) };
       }
       if (this.eofReached) {
         if (this.destroyed) throw destroyedError();
@@ -1153,7 +1197,7 @@ export class ImapClient {
    */
   fetchSummaries(
     uids: number[],
-    options: { includePreview?: boolean; maxLiteralBytes?: number } = {},
+    options: { includePreview?: boolean; maxLiteralBytes?: number; gmailLabels?: boolean } = {},
   ): Promise<ImapMessageSummary[]> {
     if (uids.length === 0) return Promise.resolve([]);
     return this.runExclusive(async () => {
@@ -1201,14 +1245,20 @@ export class ImapClient {
   private async fetchSummariesUnlocked(
     verb: "UID FETCH" | "FETCH",
     set: string,
-    options: { includePreview?: boolean; maxLiteralBytes?: number },
+    options: { includePreview?: boolean; maxLiteralBytes?: number; gmailLabels?: boolean },
   ): Promise<{ status: "OK" | "NO" | "BAD"; text: string; summaries: ImapMessageSummary[] }> {
     const tag = this.nextTag();
+    // `summaryPreviewItem()` is " BODY.PEEK[1]<0.2048>" for every MCP call;
+    // only client-api can ask for a different size (first-party.ts).
     const previewPart = options.includePreview === false
       ? ""
-      : " BODY.PEEK[1]<0.2048>";
+      : summaryPreviewItem();
+    // `summaryReferencesItem()` is "" for every MCP call (first-party.ts), and
+    // so is `gmailSummaryItems()`.
     await this.write(
-      `${tag} ${verb} ${set} (UID FLAGS ENVELOPE BODYSTRUCTURE${previewPart})${CRLF}`,
+      `${tag} ${verb} ${set} (UID FLAGS ENVELOPE BODYSTRUCTURE${previewPart}${summaryReferencesItem()}${
+        this.gmailSummaryItems(options.gmailLabels === true)
+      })${CRLF}`,
     );
     const resp = await this.readTagged(tag, {
       maxLiteralBytes: options.maxLiteralBytes,
@@ -1278,6 +1328,74 @@ export class ImapClient {
       }
       return { raw, flags };
     }, "fetch");
+  }
+
+  /**
+   * Does the server advertise this capability (as read off its answer to the
+   * authentication; see `capabilities`)? client-api only: the `thread` op asks
+   * for X-GM-EXT-1. Nothing on the MCP path calls it.
+   */
+  hasCapability(name: string): boolean {
+    return this.capabilities?.has(name.toUpperCase()) === true;
+  }
+
+  /**
+   * The Gmail items a summary FETCH adds: the thread id and message id in the
+   * SAME command as the envelope (no extra round trip), plus the labels when
+   * the caller asks. "" unless this is a client-api call that wants thread
+   * headers AND the server advertises X-GM-EXT-1, so the command an MCP call
+   * sends is the literal it has always been, on Gmail too.
+   */
+  private gmailSummaryItems(labels: boolean): string {
+    if (!wantsThreadHeaders() || this.capabilities?.has("X-GM-EXT-1") !== true) return "";
+    return labels ? " X-GM-THRID X-GM-MSGID X-GM-LABELS" : " X-GM-THRID X-GM-MSGID";
+  }
+
+  /**
+   * `UID FETCH <uids> (X-GM-THRID X-GM-MSGID)`: Gmail's thread and message ids
+   * for these UIDs of the selected mailbox, nothing else. client-api's `thread`
+   * op only (it checks `hasCapability("X-GM-EXT-1")` first).
+   */
+  fetchGmailIds(uids: number[]): Promise<Array<{ uid: number; threadId: string; messageId: string }>> {
+    if (uids.length === 0) return Promise.resolve([]);
+    return this.runExclusive(async () => {
+      const tag = this.nextTag();
+      await this.write(`${tag} UID FETCH ${uids.join(",")} (X-GM-THRID X-GM-MSGID)${CRLF}`);
+      const resp = await this.readTagged(tag, { maxLiteralBytes: 64 * 1024 });
+      if (resp.status !== "OK") throw new Error(`UID FETCH failed: ${resp.text}`);
+      const out: Array<{ uid: number; threadId: string; messageId: string }> = [];
+      for (const line of resp.untagged) {
+        if (!/^\* \d+ FETCH /.test(line)) continue;
+        const uid = /\bUID (\d+)/.exec(line)?.[1];
+        const threadId = /\bX-GM-THRID (\d+)/.exec(line)?.[1];
+        const messageId = /\bX-GM-MSGID (\d+)/.exec(line)?.[1];
+        if (uid && threadId) out.push({ uid: Number(uid), threadId, messageId: messageId ?? "" });
+      }
+      return out;
+    }, "fetch");
+  }
+
+  /**
+   * NOOP: one round trip that proves the connection is still alive and
+   * authenticated. Used by client-api's session pool to validate a connection
+   * that has sat idle before handing it out again; the MCP server, which
+   * dials per call, never needs it. Throws when the server does not answer OK.
+   */
+  noop(): Promise<void> {
+    return this.runExclusive(async () => {
+      const tag = this.nextTag();
+      await this.write(`${tag} NOOP${CRLF}`);
+      const resp = await this.readTagged(tag);
+      if (resp.status !== "OK") throw new Error(`NOOP failed: ${resp.text}`);
+    });
+  }
+
+  /**
+   * True once the socket is known to be unusable (destroyed, or EOF seen).
+   * Read by client-api's session pool when a lease is returned.
+   */
+  get dead(): boolean {
+    return this.destroyed || this.eofReached;
   }
 
   /** Mark a message read by setting the \Seen flag. Best-effort. */
@@ -1568,6 +1686,66 @@ export class ImapClient {
       }
       return statusFromLine(resp.untagged.find((l) => /^\* STATUS\b/.test(l)));
     }, "status");
+  }
+
+  /**
+   * STATUS for change detection: the counters {@link mailboxStatus} reads,
+   * plus HIGHESTMODSEQ when the server advertises CONDSTORE or QRESYNC (RFC
+   * 7162), which moves on ANY change to the mailbox including a flag change.
+   * `highestModSeq` is null on a server without it. A new method rather than
+   * a new item on `mailboxStatus`, so the command every existing caller sends
+   * stays byte for byte what it was. Used by client-api's `status` op only.
+   */
+  mailboxChangeState(
+    mailbox: string,
+  ): Promise<ImapMailboxStatus & { highestModSeq: string | null }> {
+    return this.runExclusive(async () => {
+      const condstore = this.capabilities?.has("CONDSTORE") === true ||
+        this.capabilities?.has("QRESYNC") === true;
+      const tag = this.nextTag();
+      await this.write(
+        `${tag} STATUS ${quoteMailbox(mailbox)} (MESSAGES UNSEEN UIDNEXT UIDVALIDITY` +
+          `${condstore ? " HIGHESTMODSEQ" : ""})${CRLF}`,
+      );
+      const resp = await this.readTagged(tag);
+      if (resp.status !== "OK") {
+        throw new Error(`STATUS failed for "${mailbox}": ${resp.text}`);
+      }
+      const line = resp.untagged.find((l) => /^\* STATUS\b/.test(l));
+      const modSeq = line ? /\bHIGHESTMODSEQ\s+(\d+)/.exec(line) : null;
+      return { ...statusFromLine(line), highestModSeq: modSeq ? modSeq[1] : null };
+    }, "status");
+  }
+
+  /**
+   * `FETCH first:last (UID FLAGS)` on the SELECTED mailbox, as one compact
+   * string (`uid:flag,flag;uid:...`, flags sorted), or null when the server
+   * refuses the range. No envelope, no body: a few dozen bytes per message.
+   *
+   * Used by client-api's `status` op only, and only on a server WITHOUT
+   * CONDSTORE, where STATUS cannot see a star set from another mail client:
+   * the caller hashes this for the newest messages of a folder. A new method,
+   * so no command an existing caller sends changes.
+   */
+  flagsBySequence(first: number, last: number): Promise<string | null> {
+    if (!Number.isInteger(first) || !Number.isInteger(last) || first < 1 || last < first) {
+      return Promise.resolve("");
+    }
+    return this.runExclusive(async () => {
+      const tag = this.nextTag();
+      await this.write(`${tag} FETCH ${first}:${last} (UID FLAGS)${CRLF}`);
+      const resp = await this.readTagged(tag);
+      if (resp.status !== "OK") return null;
+      const rows: string[] = [];
+      for (const line of resp.untagged) {
+        if (!/^\* \d+ FETCH /.test(line)) continue;
+        const uid = /\bUID (\d+)/.exec(line);
+        const flags = /\bFLAGS \(([^)]*)\)/.exec(line);
+        if (!uid) continue;
+        rows.push(`${uid[1]}:${(flags?.[1] ?? "").split(/\s+/).filter(Boolean).sort().join(",")}`);
+      }
+      return rows.join(";");
+    }, "fetch");
   }
 
   /**
@@ -1893,7 +2071,7 @@ export class ImapClient {
     while (true) {
       for (let i = this.bufStart; i < this.bufEnd - 1; i++) {
         if (this.buffer[i] === 0x0d && this.buffer[i + 1] === 0x0a) {
-          const line = this.decoder.decode(this.buffer.subarray(this.bufStart, i));
+          const line = bytesToByteString(this.buffer.subarray(this.bufStart, i));
           this.bufStart = i + 2;
           return line;
         }
@@ -1902,14 +2080,23 @@ export class ImapClient {
       if (!ok) {
         // EOF: return whatever remains.
         this.eofReached = true;
-        const line = this.decoder.decode(this.buffer.subarray(this.bufStart, this.bufEnd));
+        const line = bytesToByteString(this.buffer.subarray(this.bufStart, this.bufEnd));
         this.bufStart = this.bufEnd;
         return line;
       }
     }
   }
 
-  /** Read exactly n bytes (used for IMAP literals), as a latin1 string. */
+  /**
+   * Read exactly n bytes (used for IMAP literals), as a byte string: one
+   * character per octet, `charCodeAt(i)` IS octet i, for all 256 values.
+   *
+   * This used to be TextDecoder("latin1"), which is windows-1252 and maps
+   * 0x80-0x9F to code points above U+00FF. Every consumer that took the octets
+   * back with `charCodeAt(i) & 0xff` (mime.ts, so every 8bit body and
+   * attachment `email_read` returned) then got different octets. The same
+   * goes for {@link readLine}, so a response is one kind of string throughout.
+   */
   private async readExact(n: number): Promise<string> {
     // Large literals get their own right-sized allocation and are read straight
     // off the socket. Routing them through the shared buffer instead would grow
@@ -1917,14 +2104,14 @@ export class ImapClient {
     // one), and then keep it that big for the life of the connection.
     if (n > LITERAL_STREAM_THRESHOLD_BYTES) {
       const bytes = await this.readExactBytes(n);
-      return this.decoder.decode(bytes);
+      return bytesToByteString(bytes);
     }
     while (this.bufEnd - this.bufStart < n) {
       const ok = await this.fill();
       if (!ok) break;
     }
     const end = Math.min(this.bufStart + n, this.bufEnd);
-    const out = this.decoder.decode(this.buffer.subarray(this.bufStart, end));
+    const out = bytesToByteString(this.buffer.subarray(this.bufStart, end));
     this.bufStart = end;
     return out;
   }
@@ -2054,7 +2241,7 @@ export class ImapClient {
           }
           const m = /^(\S+)\s+(OK|NO|BAD)\s*(.*)$/.exec(line);
           const status = (m?.[2] as "OK" | "NO" | "BAD") ?? "BAD";
-          return { status, text: m?.[3] ?? line, untagged, literals };
+          return { status, text: serverText(m?.[3] ?? line), untagged, literals };
         }
         if (this.eofReached) {
           // The peer hung up before completing the response, or destroy() did
@@ -2405,16 +2592,21 @@ function parseSearchUids(untagged: string[]): number[] {
 }
 
 /**
- * The 0x80-0x9F slots of windows-1252, in order. Needed because the "latin1"
- * label resolves to windows-1252 under the WHATWG encoding standard that Deno
- * implements, so a read octet of 0x85 comes back as U+2026 rather than U+0085.
+ * The 0x80-0x9F slots of windows-1252, in order. The "latin1" label resolves
+ * to windows-1252 under the WHATWG encoding standard that Deno implements, so
+ * an octet of 0x85 decoded that way comes back as U+2026 rather than U+0085.
  * Inverting the byte→character mapping is the only way back to the octet.
+ *
+ * The read path no longer decodes that way (see `readExact`, 2026-10-04): it
+ * returns exact byte strings, for which the two functions below never reach
+ * this table. It stays so they keep accepting a string that WAS read through
+ * TextDecoder("latin1"), which tests and other callers still build.
  */
 const CP1252_HIGH: Map<number, number> = (() => {
   const bytes = new Uint8Array(0x20);
   for (let i = 0; i < 0x20; i++) bytes[i] = 0x80 + i;
-  // Decoded with the SAME label the read path uses, so the inverse is exact by
-  // construction rather than a hand-copied table that could drift from it.
+  // Built from the decoder itself, so the inverse is exact by construction
+  // rather than a hand-copied table that could drift from it.
   const chars = new TextDecoder("latin1").decode(bytes);
   const map = new Map<number, number>();
   for (let i = 0; i < chars.length; i++) map.set(chars.charCodeAt(i), 0x80 + i);
@@ -2424,12 +2616,13 @@ const CP1252_HIGH: Map<number, number> = (() => {
 /**
  * The octets a single-byte read produced, exactly.
  *
- * Literals come off the socket through TextDecoder("latin1"), which is
- * windows-1252 and maps 0x80-0x9F to other code points (0x85 reads as U+2026).
- * `charCodeAt(i) & 0xff` on such a string silently corrupts those bytes: every
- * UTF-8 continuation byte in 0x80-0x9F, so "…" (E2 80 A6) came back as
- * E2 26 A6. This is the exact inverse of that decode, so a raw message read as
- * a string and turned back into bytes is the message that was on the wire.
+ * Accepts both kinds of single-byte string: the exact byte string the read
+ * path returns now (every code unit is its octet), and one decoded with
+ * TextDecoder("latin1"), which is windows-1252 and maps 0x80-0x9F to other
+ * code points (0x85 reads as U+2026). `charCodeAt(i) & 0xff` on the latter
+ * silently corrupts those bytes: every UTF-8 continuation byte in 0x80-0x9F,
+ * so "…" (E2 80 A6) came back as E2 26 A6. Either way a raw message read as a
+ * string and turned back into bytes is the message that was on the wire.
  */
 export function singleByteTextToBytes(text: string): Uint8Array {
   const octets = new Uint8Array(text.length);
@@ -2446,6 +2639,26 @@ export function singleByteTextToBytes(text: string): Uint8Array {
     octets[i] = mapped;
   }
   return octets;
+}
+
+/**
+ * Text a server wrote for a person: the reason after a tagged NO / BAD, a
+ * greeting, a refused continuation. These reach error messages, and from
+ * there tool results, so they must be text and not a byte string. ASCII (all
+ * but a few localised servers) is returned as is; raw 8-bit text is read as
+ * UTF-8 when it is valid UTF-8 and as windows-1252 otherwise, which for
+ * non-UTF-8 text is exactly what the old TextDecoder("latin1") reader gave.
+ */
+function serverText(line: string): string {
+  return decodeRawHeaderOctets(line);
+}
+
+/** What the reader used to return for these octets: see {@link repairRawUtf8Name}. */
+const LEGACY_SINGLE_BYTE = new TextDecoder("latin1");
+
+/** `trim()` for a byte string: ASCII blanks only, never the octet 0xA0. */
+function trimAsciiBlanks(value: string): string {
+  return value.replace(/^[ \t]+|[ \t]+$/g, "");
 }
 
 /**
@@ -2484,7 +2697,10 @@ function repairRawUtf8Name(name: string): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(octets);
   } catch {
-    return name;
+    // Not UTF-8: a raw single-byte name. A folder name is an id a client was
+    // given earlier and hands back, so it has to stay the string it was when
+    // the reader decoded as windows-1252 (0x80 as "€", not as U+0080).
+    return LEGACY_SINGLE_BYTE.decode(octets);
   }
 }
 
@@ -2501,7 +2717,9 @@ export function capabilitiesAfterAuth(
 
 /** Read a mailbox name as it appears in a LIST or STATUS reply. */
 function decodeWireMailboxName(token: string): string {
-  let name = token.trim();
+  // ASCII blanks only: `trim()` also strips U+00A0, which in a byte string is
+  // the last octet of a raw UTF-8 name ending in "à" (C3 A0).
+  let name = trimAsciiBlanks(token);
   if (name.startsWith('"')) {
     name = name.slice(1, -1).replace(/\\(.)/g, "$1");
   }
@@ -2664,41 +2882,72 @@ function parseFetchLine(line: string): ImapMessageSummary | null {
   };
   let hasAttachments = false;
   let preview = "";
+  // The preview is decoded after the loop, from what BODYSTRUCTURE (in the
+  // same reply, in either order) says part one is.
+  let structure: Token[] | null = null;
+  let previewSource: string | null = null;
+  let referencesHeader: string | undefined;
+  // Gmail items: only ever in a reply to a client-api FETCH that asked for them.
+  let gm: { gmThreadId?: string; gmMessageId?: string; gmLabels?: string[] } | null = null;
 
   for (let i = 0; i < attrs.length; i++) {
     const key = attrs[i];
     if (key === "UID" && typeof attrs[i + 1] === "string") {
       uid = Number(attrs[i + 1]);
+    } else if (key === "X-GM-THRID" && typeof attrs[i + 1] === "string") {
+      (gm ??= {}).gmThreadId = attrs[i + 1] as string;
+      i++;
+    } else if (key === "X-GM-MSGID" && typeof attrs[i + 1] === "string") {
+      (gm ??= {}).gmMessageId = attrs[i + 1] as string;
+      i++;
+    } else if (key === "X-GM-LABELS" && Array.isArray(attrs[i + 1])) {
+      (gm ??= {}).gmLabels = (attrs[i + 1] as Token[]).filter((t): t is string => typeof t === "string");
+      i++;
     } else if (key === "FLAGS" && Array.isArray(attrs[i + 1])) {
       flags = (attrs[i + 1] as Token[]).filter((t): t is string => typeof t === "string");
     } else if (key === "ENVELOPE" && Array.isArray(attrs[i + 1])) {
       envelope = parseEnvelope(attrs[i + 1] as Token[]);
     } else if (key === "BODYSTRUCTURE" && Array.isArray(attrs[i + 1])) {
       hasAttachments = bodyStructureHasAttachment(attrs[i + 1] as Token[]);
+      structure = attrs[i + 1] as Token[];
+    } else if (
+      // `BODY[HEADER.FIELDS (REFERENCES)] <string>` tokenizes as the atom
+      // "BODY[HEADER.FIELDS", the list, the atom "]", then the value. Only a
+      // client-api FETCH asks for it; without this branch the value is ignored
+      // exactly as before (it is never mistaken for the preview: the token
+      // after "BODY[HEADER.FIELDS" is a list, not a string).
+      key === "BODY[HEADER.FIELDS" && Array.isArray(attrs[i + 1]) && attrs[i + 2] === "]" &&
+      typeof attrs[i + 3] === "string"
+    ) {
+      // The reader hands back exact octets (byte-string.ts). A header value is
+      // text, so it takes the same decoding every ENVELOPE string takes
+      // (`asStr`): no byte string reaches `references`, `thread_key` or JSON.
+      referencesHeader = decodeRawHeaderOctets(attrs[i + 3] as string);
+      i += 3;
     } else if (
       typeof key === "string" && key.startsWith("BODY[") &&
       typeof attrs[i + 1] === "string"
     ) {
-      preview = previewFromBodyPartSource(attrs[i + 1] as string);
+      previewSource = attrs[i + 1] as string;
     }
+  }
+  if (previewSource !== null) {
+    preview = cleanPreviewFromBodyPart(previewSource, structure ? partOneOfStructure(structure) : null);
   }
 
   if (!uid) return null;
-  return { uid, flags, envelope, hasAttachments, preview };
+  if (referencesHeader !== undefined) {
+    return { uid, flags, envelope, hasAttachments, preview, referencesHeader, ...(gm ?? {}) };
+  }
+  return { uid, flags, envelope, hasAttachments, preview, ...(gm ?? {}) };
 }
 
-// The preview generator used to live here, as a decoder that knew about base64
-// and quoted-printable and nothing else. It assumed `BODY[1]` was always a leaf
-// text part, so a message whose part one is a nested multipart/alternative — the
-// shape mime-build.ts emits for a send with inline attachments — had its
-// boundary line, its part headers and its base64 shipped verbatim as the
-// preview (F-03, found against a live Gmail-over-IMAP mailbox on 2026-09-20).
-//
-// It is now `previewFromBodyPartSource` in text-extract.ts, which descends
-// through any nesting using mime.ts — the same parser the `read` path uses, and
-// the reason `read` was always correct on the very messages `list` and `search`
-// mangled. Having a second, private parser here is what let the two diverge;
-// there is one now, and it belongs beside the rest of the preview policy.
+// The preview generator is `cleanPreviewFromBodyPart` in text-extract.ts, for
+// every caller. It is given the part's source and what BODYSTRUCTURE says the
+// part is, and it descends through a nested multipart using mime.ts, the same
+// parser the `read` path uses. Do not grow a second one here: a private decoder
+// in this file is what once shipped MIME framing as a preview (F-03,
+// 2026-09-20), and a guessing one beside it is what shipped CSS (2026-10-04).
 
 /** Parse an IMAP ENVELOPE token list into structured fields. */
 function parseEnvelope(env: Token[]): ImapEnvelope {
@@ -2714,6 +2963,8 @@ function parseEnvelope(env: Token[]): ImapEnvelope {
     to,
     date: date ? normalizeDate(date) : new Date().toISOString(),
     messageId: messageId || "",
+    // client-api only; an MCP call's envelope object has the keys it always had.
+    ...(wantsThreadHeaders() ? { inReplyTo: asStr(env[8]) || "" } : {}),
   };
 }
 
@@ -2732,6 +2983,34 @@ function parseAddressList(token: Token | undefined): ImapAddress[] {
   return out;
 }
 
+/**
+ * What a BODYSTRUCTURE says about the part `BODY[1]` addresses: the message
+ * itself when it is not a multipart, otherwise its first child. Null when that
+ * child is a multipart too (its source then carries its own part headers).
+ */
+function partOneOfStructure(structure: Token[]): PreviewPartInfo | null {
+  let part: Token[] = structure;
+  if (Array.isArray(part[0])) part = part[0];
+  if (Array.isArray(part[0])) return null;
+  const type = asStr(part[0]).toLowerCase();
+  if (!type) return null;
+  let charset: string | null = null;
+  const params = part[2];
+  if (Array.isArray(params)) {
+    for (let i = 0; i + 1 < params.length; i += 2) {
+      if (asStr(params[i]).toLowerCase() === "charset") charset = asStr(params[i + 1]) || null;
+    }
+  }
+  return {
+    type,
+    subtype: asStr(part[1]).toLowerCase(),
+    charset,
+    encoding: asStr(part[5]).toLowerCase() || null,
+    // body-fld-octets: lets the preview tell a whole part from a cut prefix.
+    size: typeof part[6] === "string" && /^\d+$/.test(part[6]) ? Number(part[6]) : null,
+  };
+}
+
 /** Heuristic: a BODYSTRUCTURE contains an attachment disposition. */
 function bodyStructureHasAttachment(token: Token[]): boolean {
   let found = false;
@@ -2747,10 +3026,15 @@ function bodyStructureHasAttachment(token: Token[]): boolean {
   return found;
 }
 
+/**
+ * An ENVELOPE string. Envelope fields are header values, and a sender that
+ * puts raw 8-bit octets in a header (a UTF-8 or windows-1252 subject with no
+ * RFC 2047 encoding) gets them decoded here; anything 7-bit is returned as is.
+ */
 function asStr(t: Token | undefined): string {
   if (typeof t !== "string") return "";
   if (t === "NIL") return "";
-  return t;
+  return decodeRawHeaderOctets(t);
 }
 
 /** Convert an RFC 5322 date string to an ISO 8601 timestamp; fall back to now. */

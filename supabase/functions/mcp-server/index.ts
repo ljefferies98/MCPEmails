@@ -19,6 +19,21 @@ import {
 } from "./imap-folder-target.ts";
 import { fetchImapListPage } from "./imap-list-page.ts";
 import {
+  firstPartyContext,
+  flaggedField,
+  gmailThreadField,
+  isHumanBulk,
+  readExtraFields,
+  referencesOfHeaderBlock,
+  threadFields,
+  threadGraphSelect,
+  threadMessageIdField,
+  threadMetadataHeaders,
+  wantsFlagged,
+  wantsReplyRecipients,
+  wantsTrashIds,
+} from "./first-party.ts";
+import {
   actionSelectorDescription,
   advertisedInputSchema,
   isAdvertisedTool,
@@ -139,6 +154,7 @@ import {
   type ProviderErrorBoundary,
   providerErrorLogCode,
 } from "./provider-error.ts";
+import { mapWithConcurrency } from "./provider-concurrency.ts";
 import {
   type FolderResolveAuditDetails,
   folderResolveAuditDetails,
@@ -168,7 +184,7 @@ import {
   buildMimeMessage,
   formatMailbox,
   mimeMessageToBase64url,
-  stripBccHeader,
+  draftSendBytes,
 } from "./mime-build.ts";
 import {
   consolidatedSecurityScopes,
@@ -259,10 +275,19 @@ import {
   type RecipientAddress,
   replyNoRecipientsMessage,
 } from "./recipient-rules.ts";
-import { decodeEncodedWords, getHeader, parseEmail } from "./mime.ts";
+import {
+  decodeEncodedWords,
+  embeddedMessageBody,
+  getHeader,
+  joinShownParts,
+  parseEmail,
+  parseEmailJoined,
+  type ShownBody,
+} from "./mime.ts";
 import { contactDisplayName } from "./contact-display-name.ts";
 import {
   normalizePreview,
+  tidyPreview,
   preferredBodyText,
   stripHtmlToText,
 } from "./text-extract.ts";
@@ -964,6 +989,24 @@ interface ApiKeyRow {
    */
   card_build_notified?: string | null;
   internalApprovalDispatch?: boolean;
+  /**
+   * The caller is a signed-in human using the first-party web mail client
+   * (`client-api`), not an agent holding a key.
+   *
+   * Read in exactly one place, `queueSendApproval`: a send the human pressed
+   * Send on is not held for the human's own approval. It is NOT
+   * `internalApprovalDispatch`: that marker also suppresses the signature
+   * (the approved payload already carries one), and a human's send must get
+   * the signature like any other.
+   *
+   * It cannot be set by an MCP request. `authenticateRequest` builds this row
+   * from named `api_keys` columns, there is no such column, and nothing in
+   * this server ever assigns the property. The only code that constructs a
+   * row with it is `callerKey` in `client-api/app.ts`, after it has verified a
+   * Supabase session and the caller's workspace membership. Both halves are
+   * pinned by `client-api/tests/mcp-neutral.test.ts`.
+   */
+  firstPartyHuman?: true;
 }
 
 /**
@@ -9493,6 +9536,15 @@ async function resolveInbox(
     return null;
   }
 
+  // client-api only (see first-party.ts): a row it loaded moments ago for this
+  // workspace. No store is open on an MCP request, so `firstParty` is
+  // undefined there and the query below runs exactly as before.
+  const firstParty = firstPartyContext.getStore();
+  const cached = firstParty?.inboxRow?.(inboxId, apiKey.workspace_id) as InboxRow | null | undefined;
+  if (cached && cached.workspace_id === apiKey.workspace_id && cached.status === "active") {
+    return cached;
+  }
+
   const { data, error } = await supabase
     .from("inboxes")
     .select(INBOX_SELECT_COLUMNS)
@@ -9506,6 +9558,7 @@ async function resolveInbox(
   const inbox = data as unknown as InboxRow;
   if (inbox.status !== "active") return null;
 
+  firstParty?.rememberInboxRow?.(inbox);
   return inbox;
 }
 
@@ -10218,6 +10271,18 @@ interface EmailSummary {
   has_attachments: boolean;
   folder: string;
   thread_id: string;
+  /**
+   * Starred / \Flagged / flagStatus "flagged". Present ONLY on a client-api
+   * call that asked for it (`flaggedField` in first-party.ts); an MCP result
+   * never has this key, so the advertised output schema is unchanged.
+   */
+  is_flagged?: boolean;
+  /** Threading headers: client-api only (`threadFields` in first-party.ts). */
+  message_id_header?: string | null;
+  in_reply_to?: string | null;
+  references?: string[];
+  /** Gmail-over-IMAP's X-GM-THRID: client-api only (`gmailThreadField`). */
+  gm_thread_id?: string;
 }
 
 interface ListInboxResult {
@@ -10440,10 +10505,18 @@ async function listGmailMessages(
   // Strongest evidence first: when Gmail handed back no nextPageToken, the walk
   // above enumerated the ENTIRE label and allRefs.length is a measured, exact
   // count — better than any estimate and immune to the counter quirks below.
+  //
+  // labels.get is STARTED here and awaited further down, so it shares a round
+  // trip with the per-message metadata gets instead of preceding them. The
+  // closure cannot reject (its own try/catch), and it is the only writer of
+  // `total` / `totalIsEstimate` after this point; both are read only once it
+  // has been awaited.
+  let exactTotalLookup: Promise<void> = Promise.resolve();
   if (!nextPageToken) {
     total = allRefs.length;
     totalIsEstimate = false;
   } else {
+    exactTotalLookup = (async () => {
     try {
       if (label && !label.includes(" ")) {
         const labelResp = await fetch(
@@ -10480,6 +10553,7 @@ async function listGmailMessages(
     } catch {
       // Keep the estimate-based total; this enhancement must never break listing.
     }
+    })();
   }
   // More pages remain only if Gmail still has a cursor beyond what we fetched,
   // or we somehow over-fetched past this page. When Gmail ran out of pages
@@ -10489,6 +10563,7 @@ async function listGmailMessages(
   const pageRefs = allRefs.slice(offset, offset + limit);
 
   if (pageRefs.length === 0) {
+    await exactTotalLookup;
     return {
       messages: [],
       total,
@@ -10500,11 +10575,11 @@ async function listGmailMessages(
 
   // Fetch message metadata in parallel.
   // format=metadata returns headers + snippet without downloading body content.
-  const metaResults = await Promise.all(
+  const metaLookup = Promise.all(
     pageRefs.map(({ id }) => {
       const mp = new URLSearchParams({ format: "metadata" });
       // Multiple metadataHeaders values must be repeated params.
-      for (const h of ["From", "To", "Subject", "Date"]) {
+      for (const h of ["From", "To", "Subject", "Date", ...threadMetadataHeaders()]) {
         mp.append("metadataHeaders", h);
       }
       return fetch(
@@ -10513,6 +10588,14 @@ async function listGmailMessages(
       ).then((r) => r.json() as Promise<GmailMessageMeta>);
     }),
   );
+  // labels.get first, then the rows: the order they used to complete in. If a
+  // row get fails, the failure is still thrown from here, and only after
+  // labels.get has settled, so no request is left running behind an error.
+  // The no-op handler only keeps that failure from being reported as unhandled
+  // while labels.get is awaited; `await metaLookup` below still throws it.
+  metaLookup.catch(() => {});
+  await exactTotalLookup;
+  const metaResults = await metaLookup;
 
   const messages: EmailSummary[] = metaResults.map((msg, i) => {
     const hdrs: Record<string, string> = {};
@@ -10532,6 +10615,8 @@ async function listGmailMessages(
       has_attachments: gmailHasAttachments(msg),
       folder,
       thread_id: msg.threadId ?? pageRefs[i].threadId,
+      ...flaggedField(() => (msg.labelIds ?? []).includes("STARRED")),
+      ...threadFields(() => ({ messageId: hdrs["message-id"], inReplyTo: hdrs["in-reply-to"], references: hdrs["references"] })),
     };
   });
 
@@ -10660,6 +10745,8 @@ interface OutlookMessage {
   parentFolderId?: string;
   /** Selected by the search; the key its immutable-id lookup filters on. */
   internetMessageId?: string;
+  /** Selected only for client-api (`wantsFlagged()`); never on an MCP call. */
+  flag?: { flagStatus?: string };
 }
 
 /**
@@ -10686,7 +10773,9 @@ async function listOutlookMessages(
   // there is more.
   const params = new URLSearchParams({
     $select:
-      "id,conversationId,from,toRecipients,subject,receivedDateTime,bodyPreview,isRead,hasAttachments",
+      "id,conversationId,from,toRecipients,subject,receivedDateTime,bodyPreview,isRead,hasAttachments" +
+      // client-api only; for MCP traffic this appends "" and the URL is unchanged.
+      (wantsFlagged() ? ",flag" : "") + threadGraphSelect(),
     $top: String(limit + 1),
     $skip: String(offset),
     $orderby: "receivedDateTime desc",
@@ -10745,6 +10834,8 @@ async function listOutlookMessages(
     has_attachments: msg.hasAttachments ?? false,
     folder: label || folder,
     thread_id: msg.conversationId ?? msg.id,
+    ...flaggedField(() => msg.flag?.flagStatus === "flagged"),
+    ...threadMessageIdField(() => msg.internetMessageId),
   }));
 
   // Exact when known (folder counters, or the last page), null otherwise.
@@ -11063,11 +11154,14 @@ async function listImapMessages(
         to: s.envelope.to.map(decodeEnvelopeAddress),
         subject: decodeEnvelopeSubject(s.envelope.subject),
         date: s.envelope.date,
-        preview: normalizePreview(s.preview),
+        preview: tidyPreview(s.preview),
         is_read: s.flags.includes("\\Seen"),
         has_attachments: s.hasAttachments,
         folder,
         thread_id: String(s.uid),
+        ...flaggedField(() => s.flags.includes("\\Flagged")),
+        ...threadFields(() => ({ messageId: s.envelope.messageId, inReplyTo: s.envelope.inReplyTo, references: referencesOfHeaderBlock(s.referencesHeader) })),
+        ...gmailThreadField(() => s.gmThreadId),
       });
     }
 
@@ -11094,6 +11188,14 @@ async function listImapMessages(
 // ---------------------------------------------------------------------------
 // Generic IMAP provider — email_read
 // ---------------------------------------------------------------------------
+
+/**
+ * An HTML-only part as `body_text` shows it: the same conversion
+ * `preferredBodyText` applies to an HTML-only message, links kept.
+ */
+function htmlPartToBodyText(html: string): string {
+  return stripHtmlToText(html, { keepLinks: true });
+}
 
 /**
  * Implements `email_read` for IMAP inboxes. The message id is "<folder>:<uid>"
@@ -11139,6 +11241,14 @@ async function readImapMessage(
    * imap-fetch-once.ts.
    */
   fetchedThisCall?: ImapFetchedThisCall,
+  /**
+   * Return the DISPLAYED body: the inline text parts of a multipart/mixed
+   * joined in order, so a forwarded message reads back with its original text
+   * (see `parseEmailJoined` in mime.ts). Only the read tools set it, through
+   * readOneMessage. The callers that quote a body into an outgoing message
+   * keep the first-part body they have always had.
+   */
+  joinInlineParts = false,
 ): Promise<ReadEmailResult> {
   if (!inbox.imap_host || !inbox.imap_port || !inbox.imap_password) {
     throw new Error("imap_auth_failed");
@@ -11159,7 +11269,10 @@ async function readImapMessage(
     );
     if (!msg) throw new Error("message_not_found");
 
-    const parsed = parseEmail(msg.raw);
+    // One decode path for MCP and client-api: `msg.raw` is exact octets.
+    const parsed = joinInlineParts
+      ? parseEmailJoined(msg.raw, htmlPartToBodyText)
+      : parseEmail(msg.raw);
     const h = parsed.headers;
 
     const subject = decodeEncodedWords(getHeader(h, "subject") ?? "(no subject)");
@@ -11223,6 +11336,8 @@ async function readImapMessage(
         .split(/\s+/)
         .map(stripAngleBrackets)
         .filter(Boolean),
+      ...readExtraFields(() => ({ is_flagged: msg.flags.includes("\\Flagged"), folder })),
+      ...threadMessageIdField(() => getHeader(h, "message-id")),
     };
   } catch (err) {
     if (err instanceof ImapAuthError) throw new Error("imap_auth_failed");
@@ -11437,12 +11552,15 @@ async function searchImapMessages(
       to: s.envelope.to.map(decodeEnvelopeAddress),
       subject: decodeEnvelopeSubject(s.envelope.subject),
       date: s.envelope.date,
-      preview: normalizePreview(s.preview),
+      preview: tidyPreview(s.preview),
       is_read: s.flags.includes("\\Seen"),
       has_attachments: s.hasAttachments,
       folder,
       thread_id: String(s.uid),
       relevance_score: null,
+      ...flaggedField(() => s.flags.includes("\\Flagged")),
+      ...threadFields(() => ({ messageId: s.envelope.messageId, inReplyTo: s.envelope.inReplyTo, references: referencesOfHeaderBlock(s.referencesHeader) })),
+      ...gmailThreadField(() => s.gmThreadId),
     }));
 
     return {
@@ -11652,19 +11770,23 @@ async function replyImapMessage(
       // Recipient selection (including the self-addressed fallback) lives in
       // recipient-rules.ts so this path, the Gmail/Outlook reply paths, draft_reply
       // and the approval summary cannot drift apart again.
-      const resolvedReply = computeReplyRecipients({
-        from: fromAddrs,
-        to: toAddrs,
-        cc: ccAddrs,
-        ownAddresses: inboxOwnAddresses(inbox),
-        replyAll: params.replyAll,
-      });
-      if (!resolvedReply.ok) {
-        throw new Error(replyNoRecipientsMessage("email_reply"));
+      let recipients: EmailAddressEntry[];
+      if (params.to?.length) {
+        // client-api: the human's own To list, used as given.
+        recipients = params.to.map((e) => toEmailAddressEntry(parseEmailAddress(e)));
+      } else {
+        const resolvedReply = computeReplyRecipients({
+          from: fromAddrs,
+          to: toAddrs,
+          cc: ccAddrs,
+          ownAddresses: inboxOwnAddresses(inbox),
+          replyAll: params.replyAll,
+        });
+        if (!resolvedReply.ok) {
+          throw new Error(replyNoRecipientsMessage("email_reply"));
+        }
+        recipients = resolvedReply.recipients.map(toEmailAddressEntry);
       }
-      const recipients: EmailAddressEntry[] = resolvedReply.recipients.map(
-        toEmailAddressEntry,
-      );
 
       const references = [origReferences, origMessageId].filter(Boolean).join(" ").trim();
       const messageId = crypto.randomUUID();
@@ -12052,6 +12174,16 @@ interface ReadEmailAttachmentMeta {
 interface ReadEmailResult {
   id: string;
   thread_id: string;
+  /**
+   * Starred state and the folder the message is in. Present ONLY on a
+   * client-api call (`readExtraFields` in first-party.ts); an MCP result never
+   * has these keys. `folder` is what a list row of that folder carries, so it
+   * can be passed back as a move destination.
+   */
+  is_flagged?: boolean;
+  folder?: string;
+  /** client-api only (`threadMessageIdField` in first-party.ts). */
+  message_id_header?: string | null;
   from: EmailAddressEntry;
   to: EmailAddressEntry[];
   cc: EmailAddressEntry[];
@@ -12199,6 +12331,9 @@ interface GmailAttachmentRef {
  *   - multipart/related (body + inline images)
  * Each case is handled by recursion; the first encountered text/plain and
  * text/html wins (they are usually encountered depth-first, alternatives first).
+ *
+ * That first-wins body is what the callers that QUOTE a message get. The read
+ * tools use {@link walkGmailPayloadJoined} below.
  */
 function walkGmailPayload(part: GmailFullPart): {
   textPlain: string | null;
@@ -12243,6 +12378,60 @@ function walkGmailPayload(part: GmailFullPart): {
 }
 
 /**
+ * {@link walkGmailPayload} for the read tools: the DISPLAYED body, by the same
+ * rules as `parseEmailJoined` in mime.ts. The inline text parts of a
+ * multipart/mixed are joined in order instead of the first one winning, so a
+ * forwarded message reads back with its original text. Same attachments, in
+ * the same order, as walkGmailPayload.
+ *
+ * Gmail parses a message/rfc822 part for us: its `parts` hold the embedded
+ * message, whose own headers sit on the first of them. An inline one (no
+ * filename) is shown under a forwarded-message block; an attached one stays
+ * an attachment and its text is used only when the message shows nothing else,
+ * which is what walkGmailPayload's first-wins descent already did.
+ */
+function walkGmailPayloadJoined(root: GmailFullPart): {
+  textPlain: string | null;
+  textHtml: string | null;
+  attachments: GmailAttachmentRef[];
+} {
+  const attachments: GmailAttachmentRef[] = [];
+  const walk = (part: GmailFullPart): ShownBody => {
+    let own: ShownBody = { text: null, html: null };
+    const isAttachment = typeof part.filename === "string" && part.filename.length > 0;
+    if (isAttachment) {
+      attachments.push({
+        filename: part.filename as string,
+        mimeType: part.mimeType ?? "application/octet-stream",
+        sizeBytes: part.body?.size ?? 0,
+        inlineData: part.body?.data ?? null,
+        attachmentId: part.body?.attachmentId ?? null,
+      });
+    } else if (part.mimeType === "text/plain" && part.body?.data) {
+      own = { text: base64urlToUtf8(part.body.data), html: null };
+    } else if (part.mimeType === "text/html" && part.body?.data) {
+      own = { text: null, html: base64urlToUtf8(part.body.data) };
+    }
+    const children = (part.parts ?? []).map(walk);
+    if (children.length === 0) return own;
+    if (part.mimeType === "message/rfc822") {
+      const inner = joinShownParts("multipart/mixed", children, htmlPartToBodyText);
+      if (isAttachment) return { ...inner, fallback: true };
+      const header = (name: string) =>
+        part.parts?.[0]?.headers?.find((h) => h.name.toLowerCase() === name)?.value ?? "";
+      return embeddedMessageBody(
+        { from: header("from"), date: header("date"), subject: header("subject"), to: header("to") },
+        inner,
+        htmlPartToBodyText,
+      );
+    }
+    return joinShownParts(part.mimeType ?? "", [own, ...children], htmlPartToBodyText);
+  };
+  const shown = walk(root);
+  return { textPlain: shown.text, textHtml: shown.html, attachments };
+}
+
+/**
  * Implements `email_read` for Gmail.
  *
  * Flow:
@@ -12269,6 +12458,8 @@ async function readGmailMessage(
    * to relaying the raw original (forward-relay.ts); kept for that next caller.
    */
   perFileMaxBytes?: number,
+  /** As on readImapMessage: the displayed body, for the read tools only. */
+  joinInlineParts = false,
 ): Promise<ReadEmailResult> {
   const accessToken = await withFreshGmailToken(inbox);
 
@@ -12300,8 +12491,9 @@ async function readGmailMessage(
   }
 
   // Step 3: Walk MIME tree.
-  const { textPlain, textHtml, attachments: attachmentRefs } =
-    walkGmailPayload(msg.payload ?? {});
+  const { textPlain, textHtml, attachments: attachmentRefs } = joinInlineParts
+    ? walkGmailPayloadJoined(msg.payload ?? {})
+    : walkGmailPayload(msg.payload ?? {});
 
   // Step 4: Fetch attachment content if requested. Budget defaults to 10 MB for
   // a whole-message read; the single-file download path raises it so one file
@@ -12436,7 +12628,26 @@ async function readGmailMessage(
     labels: labelIds,
     in_reply_to: hdrs["in-reply-to"] ?? null,
     references,
+    ...readExtraFields(() => ({
+      is_flagged: labelIds.includes("STARRED"),
+      folder: gmailFolderOfLabels(labelIds),
+    })),
+    ...threadMessageIdField(() => hdrs["message-id"]),
   };
+}
+
+/**
+ * The one folder a Gmail message is "in", for client-api's reader: Gmail has
+ * labels, not folders, so this picks the label a person would name. System
+ * placement first (a trashed message is in Trash whatever else it carries),
+ * then the first user label, else Archive (no INBOX label = archived).
+ * Every value is accepted back as a move destination.
+ */
+function gmailFolderOfLabels(labelIds: readonly string[]): string {
+  for (const system of ["TRASH", "SPAM", "DRAFT", "INBOX", "SENT"]) {
+    if (labelIds.includes(system)) return system;
+  }
+  return labelIds.find((id) => id.startsWith("Label_")) ?? "archive";
 }
 
 // ---------------------------------------------------------------------------
@@ -12492,6 +12703,9 @@ async function readOutlookMessage(
     "internetMessageHeaders",
     "categories",
     "flag",
+    // client-api only (the reader needs the folder); for MCP traffic nothing is
+    // appended and the request URL is unchanged.
+    ...(wantsFlagged() ? ["parentFolderId"] : []),
   ].join(",");
 
   const msgResp = await graphFetch(
@@ -12523,9 +12737,26 @@ async function readOutlookMessage(
     internetMessageId?: string;
     internetMessageHeaders?: { name: string; value: string }[];
     categories?: string[];
+    flag?: { flagStatus?: string };
+    parentFolderId?: string;
   }
 
   const msg = (await msgResp.json()) as OutlookFullMessage;
+
+  // client-api only: the folder as a list row labels it ("INBOX", "Archive",
+  // a path). One extra Graph read, made only when the store asks for it; a
+  // failure falls back to the raw folder id, which is still a valid
+  // destination.
+  let firstPartyFolder = "";
+  if (wantsFlagged() && msg.parentFolderId) {
+    firstPartyFolder = msg.parentFolderId;
+    try {
+      firstPartyFolder = (await graphFolderLabels(accessToken, [msg.parentFolderId])).get(msg.parentFolderId) ??
+        msg.parentFolderId;
+    } catch (e) {
+      if (e instanceof Error && e.name === "OutlookNoMailboxError") throw e;
+    }
+  }
 
   const iHeaders: Record<string, string> = {};
   for (const h of msg.internetMessageHeaders ?? []) {
@@ -12660,6 +12891,11 @@ async function readOutlookMessage(
     labels: msg.categories ?? [],
     in_reply_to: iHeaders["in-reply-to"] ?? null,
     references,
+    ...readExtraFields(() => ({
+      is_flagged: msg.flag?.flagStatus === "flagged",
+      folder: firstPartyFolder,
+    })),
+    ...threadMessageIdField(() => msg.internetMessageId),
   };
 }
 
@@ -12846,9 +13082,12 @@ async function readOneMessage(
         opts.mark_as_read,
         attachmentBudgetBytes,
         selectOnlyIndex,
+        undefined,
+        true,
       );
       break;
     case "outlook":
+      // Graph returns ONE already-flattened body, so there is nothing to join.
       result = await readOutlookMessage(
         inbox,
         messageId,
@@ -12871,6 +13110,7 @@ async function readOneMessage(
         opts.imap_session,
         undefined,
         opts.imap_fetched,
+        true,
       );
       break;
     default:
@@ -14647,6 +14887,13 @@ interface ReplyToEmailParams {
    */
   cc?: string[];
   bcc?: string[];
+  /**
+   * client-api only (first-party.ts `replyRecipients`): the complete To list
+   * the human left in the editor. When set, NOTHING is derived from the
+   * original: To is exactly this, Cc exactly `cc`, Bcc exactly `bcc`. The
+   * reply is threaded all the same. Never set on an MCP call.
+   */
+  to?: string[];
   /** Attachments to include with the reply (same shape as email_send). */
   attachments: Array<{ filename: string; mime_type: string; data: string }>;
   /**
@@ -14814,19 +15061,25 @@ async function replyGmailMessage(
       // plus To and Cc when reply_all is set, minus this inbox's own addresses,
       // except when that filter would leave nobody at all - self-addressed mail
       // replies to itself rather than erroring.
-      const resolvedReply = computeReplyRecipients({
-        from: [parseEmailAddress(hdrs["from"] ?? "")],
-        to: parseAddressList(hdrs["to"] ?? ""),
-        cc: parseAddressList(hdrs["cc"] ?? ""),
-        ownAddresses: inboxOwnAddresses(inbox),
-        replyAll: params.replyAll,
-      });
-      if (!resolvedReply.ok) {
-        throw new Error(replyNoRecipientsMessage("email_reply"));
+      let replyAddresses: string[];
+      if (params.to?.length) {
+        // client-api: the human's own To list, used as given.
+        replyAddresses = params.to;
+      } else {
+        const resolvedReply = computeReplyRecipients({
+          from: [parseEmailAddress(hdrs["from"] ?? "")],
+          to: parseAddressList(hdrs["to"] ?? ""),
+          cc: parseAddressList(hdrs["cc"] ?? ""),
+          ownAddresses: inboxOwnAddresses(inbox),
+          replyAll: params.replyAll,
+        });
+        if (!resolvedReply.ok) {
+          throw new Error(replyNoRecipientsMessage("email_reply"));
+        }
+        replyAddresses = resolvedReply.recipients.map((e) =>
+          formatMailbox(e.name, e.email)
+        );
       }
-      const replyAddresses: string[] = resolvedReply.recipients.map((e) =>
-        formatMailbox(e.name, e.email)
-      );
 
       // ── Step 3: Build reply subject ───────────────────────────────────────────
       const replySubject = /^re:/i.test(origSubject.trim())
@@ -15000,17 +15253,24 @@ async function replyOutlookMessage(
     });
     // Same shared rule as the Gmail and IMAP reply paths (recipient-rules.ts),
     // including the self-addressed fallback.
-    const resolvedReply = computeReplyRecipients({
-      from: origMsg.from?.emailAddress ? [fromGraph({ emailAddress: origMsg.from.emailAddress })] : [],
-      to: (origMsg.toRecipients ?? []).map(fromGraph),
-      cc: (origMsg.ccRecipients ?? []).map(fromGraph),
-      ownAddresses: inboxOwnAddresses(inbox),
-      replyAll: params.replyAll,
-    });
-    if (!resolvedReply.ok) {
-      throw new Error(replyNoRecipientsMessage("email_reply"));
+    let chosen: { name?: string; email: string }[];
+    if (params.to?.length) {
+      // client-api: the human's own To list, used as given.
+      chosen = params.to.map((e) => parseEmailAddress(e));
+    } else {
+      const resolvedReply = computeReplyRecipients({
+        from: origMsg.from?.emailAddress ? [fromGraph({ emailAddress: origMsg.from.emailAddress })] : [],
+        to: (origMsg.toRecipients ?? []).map(fromGraph),
+        cc: (origMsg.ccRecipients ?? []).map(fromGraph),
+        ownAddresses: inboxOwnAddresses(inbox),
+        replyAll: params.replyAll,
+      });
+      if (!resolvedReply.ok) {
+        throw new Error(replyNoRecipientsMessage("email_reply"));
+      }
+      chosen = resolvedReply.recipients;
     }
-    const toRecipients: GraphRecipient[] = resolvedReply.recipients.map((r) => ({
+    const toRecipients: GraphRecipient[] = chosen.map((r) => ({
       emailAddress: { ...(r.name ? { name: r.name } : {}), address: r.email },
     }));
 
@@ -16232,6 +16492,10 @@ async function executeReplyToEmail(
   // to copy someone on a reply short of sending a new, unthreaded message.
   const extraCc = replyExtraAddresses(args["cc"]);
   const extraBcc = replyExtraAddresses(args["bcc"]);
+  // client-api only: an explicit To list replaces the derived recipients (see
+  // ReplyToEmailParams.to). For MCP traffic the store is not open, `to` is not
+  // read at all, and the params below are built exactly as before.
+  const explicitTo = wantsReplyRecipients() ? replyExtraAddresses(args["to"]) : [];
 
   // include_signature (optional, default true) — explicit false suppresses the
   // inbox signature for this reply (e.g. terse one-line replies).
@@ -16346,6 +16610,7 @@ async function executeReplyToEmail(
     replyAll,
     cc: extraCc,
     bcc: extraBcc,
+    ...(explicitTo.length > 0 ? { to: explicitTo } : {}),
     attachments,
     include_signature: includeSignature,
   };
@@ -16699,6 +16964,9 @@ async function queueSendApproval(
   operation = "email_send",
 ): Promise<QueuedApproval | null> {
   if (!inbox.send_approval_required || apiKey.internalApprovalDispatch) return null;
+  // The web mail client's human sender (see ApiKeyRow.firstPartyHuman): the
+  // person pressing Send is the approver this gate exists to wait for.
+  if (apiKey.firstPartyHuman === true) return null;
   const ciphertext = await encryptForStorage(JSON.stringify(payload));
   // Resolved before the insert, never after: the summary is what a reviewer
   // sees, so a row must not exist in a state where it is blank. It is also the
@@ -17477,7 +17745,7 @@ async function searchGmailMessages(
   const metaResults = await Promise.all(
     pageRefs.map(({ id }) => {
       const mp = new URLSearchParams({ format: "metadata" });
-      for (const h of ["From", "To", "Subject", "Date"]) {
+      for (const h of ["From", "To", "Subject", "Date", ...threadMetadataHeaders()]) {
         mp.append("metadataHeaders", h);
       }
       return fetch(
@@ -17522,6 +17790,8 @@ async function searchGmailMessages(
       folder,
       thread_id: msg.threadId ?? pageRefs[i].threadId,
       relevance_score: null,
+      ...flaggedField(() => labelIds.includes("STARRED")),
+      ...threadFields(() => ({ messageId: hdrs["message-id"], inReplyTo: hdrs["in-reply-to"], references: hdrs["references"] })),
     };
   });
 
@@ -17586,7 +17856,9 @@ async function searchOutlookMessages(
   const select =
     "id,conversationId,from,toRecipients,subject,receivedDateTime,bodyPreview,isRead,hasAttachments,parentFolderId," +
     // Needed only to look a $search hit up again for its immutable id.
-    "internetMessageId";
+    "internetMessageId" +
+    // client-api only; for MCP traffic this appends "" and the URL is unchanged.
+    (wantsFlagged() ? ",flag" : "");
 
   // ── One request per listed folder ─────────────────────────────────────────
   // No folders listed keeps the whole-mailbox URL, which is the only case where
@@ -17733,6 +18005,8 @@ async function searchOutlookMessages(
     folder: (msg.parentFolderId && folderLabels.get(msg.parentFolderId)) || folder,
     thread_id: msg.conversationId ?? msg.id,
     relevance_score: null,
+    ...flaggedField(() => msg.flag?.flagStatus === "flagged"),
+    ...threadMessageIdField(() => msg.internetMessageId),
   }));
 
   return {
@@ -21489,12 +21763,25 @@ function makeBulkStopCheck(
   };
 }
 
+/** A human's selection up to this size runs without a `bulk_runs` record (see startBulkRun). */
+const FIRST_PARTY_UNRECORDED_BULK_MAX = 50;
+
 /**
  * Bulk-run records contain counters and timing only — never search terms,
  * message IDs, subjects, bodies, or attachments. They make work observable
  * from the dashboard and provide a durable, cooperative stop signal.
  */
 async function startBulkRun(apiKey: ApiKeyRow, inbox: InboxRow, operation: "move_batch" | "flag" | "search_and_move", total: number): Promise<string | null> {
+  // client-api, human caller only (first-party.ts `humanBulk`): a person
+  // starring one message or archiving a handful is not a "bulk run". The run
+  // record is three database round trips around the provider call (insert,
+  // progress/cancel check, finish), measured live 2026-10-04 at ~230 ms of a
+  // 520 ms flag, and it listed every click on the dashboard as bulk work. A
+  // null run id is already the "could not record" path: no progress writes, no
+  // cancel polling, `run_id: null` in the result. A large selection still gets
+  // its run, so it stays observable and stoppable. Inert for MCP traffic:
+  // `isHumanBulk()` is false whenever the first-party store is not open.
+  if (total <= FIRST_PARTY_UNRECORDED_BULK_MAX && isHumanBulk()) return null;
   const { data, error } = await supabase.from("bulk_runs").insert({
     workspace_id: apiKey.workspace_id, api_key_id: apiKey.id, inbox_id: inbox.id,
     operation, status: "running", total,
@@ -22002,6 +22289,11 @@ function imapBulkDelete(
   // had before. The name stays valid if runImapFolderGroups invalidates the
   // session and reconnects between groups.
   let trash: string | null = null;
+  // client-api only (first-party.ts `trashIds`): where each message landed in
+  // Trash, so the client can undo. Read once, up front. For MCP traffic it is
+  // false, nothing is collected, and the result has no `newMessageIds` key.
+  const reportIds = wantsTrashIds() && !permanent;
+  const newMessageIds: Record<string, string> = {};
   return imapBulkByFolderGroup(inbox, messageIds, runId, opts, async (client, group) => {
     const uids = group.items.map((i) => i.uid);
     if (permanent) {
@@ -22013,9 +22305,12 @@ function imapBulkDelete(
       // work instead of failing on a raw "Trash" literal. uidMove falls back to
       // COPY+EXPUNGE if MOVE is unsupported.
       trash ??= await resolveImapTrashMailbox(client);
-      await client.uidMove(uids, trash);
+      const moved = await client.uidMove(uids, trash);
+      if (reportIds) {
+        Object.assign(newMessageIds, newMessageIdsFor(group.items, moved, trash, encodeImapId));
+      }
     }
-  });
+  }).then((result) => (reportIds ? { ...result, newMessageIds } : result));
 }
 
 /** Groups IMAP message IDs by source folder and runs a bulk UID STORE per group. */
@@ -22441,6 +22736,11 @@ async function readBulkReviewMode(inboxId: string): Promise<string> {
  * them. The decision itself lives in `shouldPlanForMode` so it can be tested.
  */
 async function shouldPlanBulkOperation(inbox: InboxRow): Promise<boolean> {
+  // client-api, human caller only (first-party.ts `humanBulk`): the person who
+  // selected the messages and pressed Move is the reviewer a plan waits for.
+  // The store is never open on an MCP request, so this is false there and the
+  // mode is read exactly as before.
+  if (isHumanBulk()) return false;
   return shouldPlanForMode(await readBulkReviewMode(inbox.id));
 }
 
@@ -23090,6 +23390,8 @@ async function executeBulkDelete(
     inbox.id,
     { permanent },
     partialFieldsFor("email_delete_batch", messageIds, bulkResult, budget, permanent),
+    // Set only by imapBulkDelete on a client-api call; undefined for MCP.
+    bulkResult.newMessageIds,
   );
 }
 
@@ -24545,7 +24847,10 @@ async function imapSendDraft(
       // NOT contain a Bcc header — strip it so To/Cc recipients never see the BCC
       // addresses. (The draft still in the Drafts folder may keep its Bcc header;
       // that's the user's own copy.)
-      const sentMime = stripBccHeader(rawMime);
+      // Octets, not a string: `rawMime` is the draft's exact octets, one per
+      // character, and handing that string to SMTP / APPEND would UTF-8-encode
+      // it, turning every 8-bit octet of a draft another client wrote into two.
+      const sentMime = draftSendBytes(rawMime);
 
       return { sentMime, recipients, parsed, folder, uid, password };
     });
@@ -24630,6 +24935,14 @@ async function imapDeleteDraft(
 
 // ── Gmail draft helpers ───────────────────────────────────────────────────────
 
+/**
+ * How many per-draft `messages.get` calls draft_list keeps in flight. Gmail
+ * meters concurrent requests per user and answers the excess with 429, which
+ * this listing would silently turn into a missing draft, so the fan-out is
+ * small and bounded rather than "all of them".
+ */
+const GMAIL_DRAFT_METADATA_CONCURRENCY = 5;
+
 async function gmailListDrafts(
   inbox: InboxRow,
   limit: number,
@@ -24648,38 +24961,47 @@ async function gmailListDrafts(
   };
   const drafts = listData.drafts ?? [];
 
-  const summaries: DraftSummary[] = [];
-  for (const d of drafts) {
-    try {
-      const msgResp = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${d.message.id}` +
-        `?format=metadata&metadataHeaders=Subject&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Date`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if (!msgResp.ok) continue;
-      const msgData = (await msgResp.json()) as {
-        payload?: { headers?: { name: string; value: string }[] };
-        internalDate?: string;
-      };
-      const hdr = msgData.payload?.headers ?? [];
-      const subject = hdr.find((h) => h.name === "Subject")?.value ?? "(no subject)";
-      const toRaw = hdr.find((h) => h.name === "To")?.value ?? "";
-      const ccRaw = hdr.find((h) => h.name === "Cc")?.value ?? "";
-      const internalDate = msgData.internalDate
-        ? new Date(parseInt(msgData.internalDate, 10)).toISOString()
-        : new Date().toISOString();
-      summaries.push({
-        draft_id: d.id,
-        subject,
-        to: parseAddressList(toRaw),
-        cc: parseAddressList(ccRaw),
-        created_at: internalDate,
-      });
-    } catch {
-      // Skip drafts that fail to fetch metadata.
-    }
-  }
-  return summaries;
+  // One messages.get per draft, a few at a time rather than one after another
+  // (20 drafts used to be 20 round trips end to end). The summaries keep the
+  // order drafts.list gave, and a draft whose get fails in any way is left
+  // out, exactly as when this was a serial loop: nothing a single get does can
+  // fail the listing.
+  const fetched = await mapWithConcurrency(
+    drafts,
+    GMAIL_DRAFT_METADATA_CONCURRENCY,
+    async (d): Promise<DraftSummary | null> => {
+      try {
+        const msgResp = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${d.message.id}` +
+          `?format=metadata&metadataHeaders=Subject&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Date`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (!msgResp.ok) return null;
+        const msgData = (await msgResp.json()) as {
+          payload?: { headers?: { name: string; value: string }[] };
+          internalDate?: string;
+        };
+        const hdr = msgData.payload?.headers ?? [];
+        const subject = hdr.find((h) => h.name === "Subject")?.value ?? "(no subject)";
+        const toRaw = hdr.find((h) => h.name === "To")?.value ?? "";
+        const ccRaw = hdr.find((h) => h.name === "Cc")?.value ?? "";
+        const internalDate = msgData.internalDate
+          ? new Date(parseInt(msgData.internalDate, 10)).toISOString()
+          : new Date().toISOString();
+        return {
+          draft_id: d.id,
+          subject,
+          to: parseAddressList(toRaw),
+          cc: parseAddressList(ccRaw),
+          created_at: internalDate,
+        };
+      } catch {
+        // Skip drafts that fail to fetch metadata.
+        return null;
+      }
+    },
+  );
+  return fetched.filter((summary): summary is DraftSummary => summary !== null);
 }
 
 /**
@@ -28704,6 +29026,153 @@ function acquireByteHeavySlot(dispatchName: string, apiKeyId: string): ByteHeavy
 }
 
 /**
+ * What one executor hands back: the MCP tool result plus the two fields the
+ * activity log records. `logErrorDetails` is value-free provider diagnostics.
+ */
+interface ExecutorOutcome {
+  result: unknown;
+  logStatus: "success" | "error";
+  logErrorCode: string | null;
+  logErrorDetails?: ProviderErrorAuditDetails | null;
+}
+
+/**
+ * Run the executor behind one dispatch name (a legacy per-action tool name
+ * such as `email_list`), or return null when no executor exists for it.
+ *
+ * This is the if/else chain that used to sit inline in `handleToolsCall`,
+ * lifted out unchanged so `client-api` (the web mail client's edge function)
+ * can run the same executors for a signed-in human. It deliberately contains
+ * NONE of what `handleToolsCall` wraps around it: no scope check, no schema
+ * validation, no action cap, no idempotency claim, no activity log, no rate
+ * limit. A caller other than `handleToolsCall` owns every one of those.
+ */
+async function dispatchExecutor(
+  dispatchName: string,
+  rawArgs: unknown,
+  apiKey: ApiKeyRow,
+): Promise<ExecutorOutcome | null> {
+  if (dispatchName === "inbox_list") return await executeListInboxes(rawArgs, apiKey);
+  if (dispatchName === "email_list") return await executeListInbox(rawArgs, apiKey);
+  if (dispatchName === "email_read") return await executeReadEmail(rawArgs, apiKey);
+  if (dispatchName === "email_read_batch") return await executeReadEmails(rawArgs, apiKey);
+  if (dispatchName === "email_attachment") return await executeReadAttachment(rawArgs, apiKey);
+  if (dispatchName === "email_original") return await executeReadOriginal(rawArgs, apiKey);
+  if (dispatchName === "email_extract") return await executeExtractAttachment(rawArgs, apiKey);
+  if (dispatchName === "email_send") return await executeSendEmail(rawArgs, apiKey);
+  if (dispatchName === "email_reply") return await executeReplyToEmail(rawArgs, apiKey);
+  if (dispatchName === "email_search") return await executeSearchEmails(rawArgs, apiKey);
+  if (dispatchName === "email_archive") return await executeArchiveEmail(rawArgs, apiKey);
+  if (dispatchName === "folder_list") return await executeListFolders(rawArgs, apiKey);
+  if (dispatchName === "folder_create") return await executeCreateFolder(rawArgs, apiKey);
+  if (dispatchName === "folder_rename") return await executeRenameFolder(rawArgs, apiKey);
+  if (dispatchName === "folder_delete") return await executeDeleteFolder(rawArgs, apiKey);
+  if (dispatchName === "email_move") return await executeMoveEmail(rawArgs, apiKey);
+  if (dispatchName === "email_copy") return await executeCopyEmail(rawArgs, apiKey);
+  if (dispatchName === "email_delete") return await executeDeleteEmail(rawArgs, apiKey);
+  if (dispatchName === "email_move_batch") return await executeBulkMove(rawArgs, apiKey);
+  if (dispatchName === "email_copy_batch") return await executeBulkCopy(rawArgs, apiKey);
+  if (dispatchName === "email_delete_batch") return await executeBulkDelete(rawArgs, apiKey);
+  if (dispatchName === "email_flag") return await executeBulkFlag(rawArgs, apiKey);
+  if (dispatchName === "email_search_and_move") return await executeSearchAndMove(rawArgs, apiKey);
+  if (dispatchName === "email_search_and_delete") return await executeSearchAndDelete(rawArgs, apiKey);
+  if (dispatchName === "email_forward") return await executeForwardEmail(rawArgs, apiKey);
+  if (dispatchName === "draft_list") return await executeListDrafts(rawArgs, apiKey);
+  if (dispatchName === "draft_create") return await executeCreateDraft(rawArgs, apiKey);
+  if (dispatchName === "draft_reply") return await executeCreateReplyDraft(rawArgs, apiKey);
+  if (dispatchName === "draft_update") return await executeUpdateDraft(rawArgs, apiKey);
+  if (dispatchName === "draft_send") return await executeSendDraft(rawArgs, apiKey);
+  if (dispatchName === "draft_delete") return await executeDeleteDraft(rawArgs, apiKey);
+  if (dispatchName === "contact_search") return await executeSearchContacts(rawArgs, apiKey);
+  if (dispatchName === "schedule_create") return await executeScheduleSend(rawArgs, apiKey);
+  if (dispatchName === "schedule_list") return await executeListScheduled(rawArgs, apiKey);
+  if (dispatchName === "schedule_cancel") return await executeCancelScheduled(rawArgs, apiKey);
+  if (dispatchName === "signature_get") return await executeGetSignature(rawArgs, apiKey);
+  if (dispatchName === "signature_set") return await executeSetSignature(rawArgs, apiKey);
+  if (dispatchName.startsWith("automation_")) {
+    // All nine automation actions share one handler in triage-engine.ts. The
+    // scope gate above has already checked manage:automations; everything
+    // below re-checks tenancy on every query, because an automation_id
+    // supplied by the caller proves nothing about who owns it.
+    //
+    // This branch and the two below it are the three dispatch sites that do
+    // NOT carry `logErrorDetails`, and the reason is scope rather than
+    // oversight. Their handlers are exported from other modules
+    // (triage-engine.ts, mcp-app-approvals.ts, mcp-app-bulk.ts), so threading
+    // the field would mean widening three signatures outside the file this
+    // 2026-09-01 change owns. The automation and approval handlers only read
+    // and write our own tables, so there is nothing for the classifier to say
+    // about them. `runBulkTool` genuinely does reach a provider, through the
+    // same injected bulk path the immediate route uses, and it is worth a
+    // follow-up: note that its code must stay `provider_error` regardless,
+    // because executing a frozen plan is a mailbox mutation and mutations
+    // settle the same idempotency ledger the send paths do.
+    const { result, logStatus, logErrorCode } = await runAutomationTool(
+      dispatchName.slice("automation_".length),
+      rawArgs,
+      automationDepsFor(apiKey),
+    );
+    return { result, logStatus, logErrorCode };
+  }
+  if (isApprovalToolName(dispatchName)) {
+    // MCP Apps approval tools. Every guard (workspace, inbox allowlist,
+    // still-pending, not expired) is re-applied inside each handler — the
+    // scope check above is necessary but nowhere near sufficient, because an
+    // approval_id supplied by the caller proves nothing about the caller.
+    const { result, logStatus, logErrorCode } = await runApprovalTool(
+      dispatchName,
+      {
+        // Service-role client: RLS re-evaluates the send_approvals SELECT
+        // policy against the NEW row, so a status write from an RLS client
+        // would be rejected.
+        db: supabase,
+        encrypt: encryptForStorage,
+        decrypt: decryptStoredToken,
+        appUrl: APP_URL,
+      },
+      {
+        id: apiKey.id,
+        workspace_id: apiKey.workspace_id,
+        name: apiKey.name,
+        inbox_ids: apiKey.inbox_ids,
+      },
+      rawArgs,
+    )!;
+    return { result, logStatus, logErrorCode };
+  }
+  if (isDraftEditorToolName(dispatchName)) {
+    // MCP Apps draft-editor tools. The scope check above verified
+    // `manage:drafts`; everything else — `read:email` for the read, the
+    // inbox's workspace and the key's allowlist, the workspace gate — is
+    // re-applied inside the handler, because a draft_id supplied by the
+    // caller proves nothing about the caller. See mcp-app-drafts.ts.
+    const { result, logStatus, logErrorCode } = await runDraftEditorTool(
+      dispatchName,
+      draftEditorDepsFor(apiKey),
+      draftEditorCallerFor(apiKey),
+      rawArgs,
+    )!;
+    return { result, logStatus, logErrorCode };
+  }
+  if (isBulkToolName(dispatchName)) {
+    // MCP Apps bulk-plan tools. As with the approval tools, the scope check
+    // above is necessary and nowhere near sufficient: a plan_id supplied by
+    // the caller proves nothing, so every guard (workspace, inbox allowlist,
+    // still-pending, not expired) is re-applied inside the handler, and the
+    // operation's scope is read from the encrypted row rather than from any
+    // argument.
+    const { result, logStatus, logErrorCode } = await runBulkTool(
+      dispatchName,
+      bulkDepsFor(apiKey),
+      bulkCallerFor(apiKey),
+      rawArgs,
+    )!;
+    return { result, logStatus, logErrorCode };
+  }
+  return null;
+}
+
+/**
  * `tools/call` — executes a named tool with the supplied arguments.
  *
  * This handler is the central dispatch point for all MCP tool invocations.
@@ -29373,349 +29842,12 @@ async function handleToolsCall(
   try {
     await activityInboxStore.run(logCtx, async () => {
     // ── Dispatch to the implemented tool handler ───────────────────────────
-    if (dispatchName === "inbox_list") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeListInboxes(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_list") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeListInbox(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_read") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeReadEmail(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_read_batch") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeReadEmails(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_attachment") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeReadAttachment(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_original") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeReadOriginal(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_extract") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeExtractAttachment(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_send") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeSendEmail(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_reply") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeReplyToEmail(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_search") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeSearchEmails(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_archive") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeArchiveEmail(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "folder_list") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeListFolders(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "folder_create") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeCreateFolder(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "folder_rename") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeRenameFolder(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "folder_delete") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeDeleteFolder(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_move") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeMoveEmail(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_copy") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeCopyEmail(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_delete") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeDeleteEmail(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_move_batch") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeBulkMove(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_copy_batch") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeBulkCopy(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_delete_batch") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeBulkDelete(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_flag") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeBulkFlag(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_search_and_move") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeSearchAndMove(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_search_and_delete") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeSearchAndDelete(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "email_forward") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeForwardEmail(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "draft_list") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeListDrafts(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "draft_create") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeCreateDraft(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "draft_reply") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeCreateReplyDraft(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "draft_update") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeUpdateDraft(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "draft_send") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeSendDraft(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "draft_delete") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeDeleteDraft(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "contact_search") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeSearchContacts(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "schedule_create") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeScheduleSend(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "schedule_list") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeListScheduled(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "schedule_cancel") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeCancelScheduled(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "signature_get") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeGetSignature(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName === "signature_set") {
-      const { result, logStatus: ls, logErrorCode: lec, logErrorDetails: led } =
-        await executeSetSignature(rawArgs, apiKey);
-      logStatus = ls;
-      logErrorCode = lec;
-      logErrorDetails = led ?? null;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (dispatchName.startsWith("automation_")) {
-      // All nine automation actions share one handler in triage-engine.ts. The
-      // scope gate above has already checked manage:automations; everything
-      // below re-checks tenancy on every query, because an automation_id
-      // supplied by the caller proves nothing about who owns it.
-      //
-      // This branch and the two below it are the three dispatch sites that do
-      // NOT carry `logErrorDetails`, and the reason is scope rather than
-      // oversight. Their handlers are exported from other modules
-      // (triage-engine.ts, mcp-app-approvals.ts, mcp-app-bulk.ts), so threading
-      // the field would mean widening three signatures outside the file this
-      // 2026-09-01 change owns. The automation and approval handlers only read
-      // and write our own tables, so there is nothing for the classifier to say
-      // about them. `runBulkTool` genuinely does reach a provider, through the
-      // same injected bulk path the immediate route uses, and it is worth a
-      // follow-up: note that its code must stay `provider_error` regardless,
-      // because executing a frozen plan is a mailbox mutation and mutations
-      // settle the same idempotency ledger the send paths do.
-      const { result, logStatus: ls, logErrorCode: lec } = await runAutomationTool(
-        dispatchName.slice("automation_".length),
-        rawArgs,
-        automationDepsFor(apiKey),
-      );
-      logStatus = ls;
-      logErrorCode = lec;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (isApprovalToolName(dispatchName)) {
-      // MCP Apps approval tools. Every guard (workspace, inbox allowlist,
-      // still-pending, not expired) is re-applied inside each handler — the
-      // scope check above is necessary but nowhere near sufficient, because an
-      // approval_id supplied by the caller proves nothing about the caller.
-      const { result, logStatus: ls, logErrorCode: lec } = await runApprovalTool(
-        dispatchName,
-        {
-          // Service-role client: RLS re-evaluates the send_approvals SELECT
-          // policy against the NEW row, so a status write from an RLS client
-          // would be rejected.
-          db: supabase,
-          encrypt: encryptForStorage,
-          decrypt: decryptStoredToken,
-          appUrl: APP_URL,
-        },
-        {
-          id: apiKey.id,
-          workspace_id: apiKey.workspace_id,
-          name: apiKey.name,
-          inbox_ids: apiKey.inbox_ids,
-        },
-        rawArgs,
-      )!;
-      logStatus = ls;
-      logErrorCode = lec;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (isDraftEditorToolName(dispatchName)) {
-      // MCP Apps draft-editor tools. The scope check above verified
-      // `manage:drafts`; everything else — `read:email` for the read, the
-      // inbox's workspace and the key's allowlist, the workspace gate — is
-      // re-applied inside the handler, because a draft_id supplied by the
-      // caller proves nothing about the caller. See mcp-app-drafts.ts.
-      const { result, logStatus: ls, logErrorCode: lec } = await runDraftEditorTool(
-        dispatchName,
-        draftEditorDepsFor(apiKey),
-        draftEditorCallerFor(apiKey),
-        rawArgs,
-      )!;
-      logStatus = ls;
-      logErrorCode = lec;
-      toolResult = { jsonrpc: "2.0", id, result };
-    } else if (isBulkToolName(dispatchName)) {
-      // MCP Apps bulk-plan tools. As with the approval tools, the scope check
-      // above is necessary and nowhere near sufficient: a plan_id supplied by
-      // the caller proves nothing, so every guard (workspace, inbox allowlist,
-      // still-pending, not expired) is re-applied inside the handler, and the
-      // operation's scope is read from the encrypted row rather than from any
-      // argument.
-      const { result, logStatus: ls, logErrorCode: lec } = await runBulkTool(
-        dispatchName,
-        bulkDepsFor(apiKey),
-        bulkCallerFor(apiKey),
-        rawArgs,
-      )!;
-      logStatus = ls;
-      logErrorCode = lec;
-      toolResult = { jsonrpc: "2.0", id, result };
+    const outcome = await dispatchExecutor(dispatchName, rawArgs, apiKey);
+    if (outcome) {
+      logStatus = outcome.logStatus;
+      logErrorCode = outcome.logErrorCode;
+      logErrorDetails = outcome.logErrorDetails ?? null;
+      toolResult = { jsonrpc: "2.0", id, result: outcome.result };
     } else {
       // Tool is registered in TOOL_REGISTRY but not yet implemented.
       // Returns a structured error so MCP clients receive a valid JSON-RPC
@@ -31097,6 +31229,10 @@ async function handleTriagePreview(req: Request): Promise<Response> {
     .eq("id", apiKeyId)
     .eq("workspace_id", workspaceId)
     .is("deleted_at", null)
+    // The hidden web-client key (`kind` set, migration 20261004100000) is not a
+    // key the dashboard may preview through. Every ordinary key has kind NULL.
+    // DEPLOY ORDER: needs that migration applied before this function ships.
+    .is("kind", null)
     .maybeSingle();
   if (!keyRow) return json({ error: "api_key_not_found" }, 404);
   const key = keyRow as unknown as TriageApiKey;
@@ -32001,7 +32137,13 @@ async function handleMeteredRequest(req: Request): Promise<Response> {
 // and builds a fresh NextResponse, so it is a second such layer, outside this
 // runtime entirely. Byte-transparent today. No Deno test can be the last word
 // on what a browser client receives.)
-if (Deno.env.get("MCP_SERVER_NO_LISTEN") !== "1") {
+// The second condition is for `client-api`, which imports this module inside
+// its own isolate and marks that isolate on globalThis (the edge runtime
+// refuses Deno.env.set). Nothing in this function ever sets it.
+if (
+  Deno.env.get("MCP_SERVER_NO_LISTEN") !== "1" &&
+  (globalThis as Record<string, unknown>).MCP_SERVER_NO_LISTEN !== "1"
+) {
   Deno.serve(handleRequest);
 }
 
@@ -32106,3 +32248,62 @@ export {
   toolsForListing,
   validateInputSchema,
 };
+
+// Exported for provider-call-baseline.test.ts and the provider-concurrency
+// tests, and for nothing else. These are the three executors whose provider
+// calls those suites pin (draft_list, email_list, email_read_batch). A fake
+// `fetch` answers Gmail, Graph and PostgREST, so the assertions are on the
+// tool result the executor returns and on the requests it issued. A separate
+// statement rather than three more names in the block above, so the two do not
+// collide when another branch edits that list.
+export { executeListDrafts, executeListInbox, executeReadEmails };
+
+// Exported for read-joined-body.test.ts only: the single-message read, run
+// against the same fakes, so the forwarded-message fix is pinned on the tool
+// result of `email_read` as well as of `email_read_batch`.
+export { executeReadEmail };
+
+// ---------------------------------------------------------------------------
+// Exported for `client-api` (supabase/functions/client-api), the web mail
+// client's edge function, and for nothing else.
+//
+// client-api imports this module in-process (with MCP_SERVER_NO_LISTEN=1, so
+// the `Deno.serve` above never runs in its isolate) and drives the same
+// executors an MCP `tools/call` reaches, for a signed-in human instead of an
+// API key. It owns its own auth, gating, rate limit and logging; what it needs
+// from here is the tool layer and the few primitives that layer is built on.
+// Nothing below is called by this server's own request path in a new way:
+// every name is an existing function or value, exported unchanged. A separate
+// statement, like the one above, so it does not collide with edits to the
+// test export list.
+// ---------------------------------------------------------------------------
+export {
+  // The executor chain `handleToolsCall` dispatches through; client-api's one
+  // entry point into the tool layer.
+  dispatchExecutor,
+  // Outbound/mutation idempotency: client-api claims and settles the same
+  // ledger so a retried Send from the browser cannot double-send.
+  claimOutboundIdempotency,
+  completeOutboundIdempotency,
+  // Read a settled result back into the ledger's snapshot/approval shape.
+  isPartialToolResult,
+  pendingApprovalIdFromToolResult,
+  replaySnapshotFromToolResult,
+  // Workspace-scoped inbox lookup, for the `status` op.
+  resolveInbox,
+  // Folder alias/name/id -> provider folder id, for the `status` op.
+  resolveFolderId,
+  // Provider credentials and paths the `status` op reads counters with.
+  imapSessionFor,
+  outlookFolderPathSegment,
+  withFreshGmailToken,
+  withFreshOutlookToken,
+  // The service-role client: membership, the workspace gate, the hidden
+  // web-client key and the assistant allowance RPCs all go through it.
+  supabase as serviceRoleClient,
+  // The projection `resolveInbox` selects, so client-api can load the same
+  // row shape in its one boot query and never a narrower one.
+  INBOX_SELECT_COLUMNS,
+};
+// The row and key shapes those functions take, so client-api does not restate them.
+export type { ApiKeyRow, ExecutorOutcome, InboxRow };

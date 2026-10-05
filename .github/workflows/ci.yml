@@ -189,6 +189,25 @@ jobs:
       - name: Run card tests (five suites via harness/verify.mjs)
         run: cd apps/mcp-app && npm test
 
+  # The web mail client (apps/client, app.mcpemails.com): a Vite + React SPA.
+  # Same shape as the `card` job above and for the same reason: apps/client is
+  # an npm workspace with no lockfile of its own, so the root `npm ci` is what
+  # installs it. One step, three checks, in the order they fail fastest: the
+  # type check, the vitest suite (pure logic plus jsdom: router, stores, layout
+  # maths, the keyboard matcher, the palette ranker), then the production build.
+  client:
+    name: Web Client (typecheck, tests, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: 'npm'
+      - run: npm ci
+      - name: Type check, test and build the client
+        run: cd apps/client && npm run typecheck && npm test && npm run build
+
   # The edge function is a separate runtime with a separate test suite, and
   # until now nothing ran it. That mattered more than it looked: the MCP server
   # is where mail credentials are decrypted and where every mailbox operation
@@ -246,6 +265,17 @@ jobs:
         env:
           HOST_GUARD_SKIP_NETWORK_TESTS: '1'
         run: deno test --node-modules-dir=none --allow-read --allow-env --allow-run=git supabase/functions/mcp-server/
+      # client-api (the web mail client's function) imports the tool layer
+      # above in-process, so it is checked and tested in the same job, with the
+      # same flags and for the same reasons. No --allow-net here either: its
+      # IMAP tests run on the scripted fake server and its JWT tests on
+      # locally generated keys, so a test that reaches for a socket fails.
+      - name: Type check client-api
+        run: deno check --node-modules-dir=none supabase/functions/client-api/index.ts
+      - name: Run client-api tests
+        env:
+          HOST_GUARD_SKIP_NETWORK_TESTS: '1'
+        run: deno test --node-modules-dir=none --allow-read --allow-env --allow-run=git supabase/functions/client-api/
 
   build:
     name: Build Check
@@ -390,7 +420,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: always()
-    needs: [audit, typecheck, test, card, deno, build, db, selfhost]
+    needs: [audit, typecheck, test, card, client, deno, build, db, selfhost]
     runs-on: ubuntu-latest
     steps:
       - name: Every job succeeded
