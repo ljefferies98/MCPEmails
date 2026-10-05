@@ -149,3 +149,11 @@
 20260929140000_acquisition_email_segment.sql	partial	0015: funnel stage check; workspaces.acquisition_email_segment is marketing attribution
 20260929190000_acquisition_source_google_ads.sql	skipped	marketing acquisition attribution
 20261002180000_checkout_cancel_feedback.sql	skipped	Stripe checkout feedback table
+20261004100000_web_client_enabled.sql	ported	0017: workspaces.web_client_enabled (always false on self-host)
+20261004100100_web_client_api_key_kind.sql	partial	0017: api_keys.kind + check + one-per-workspace index; the auth.uid() RLS policies are hosted-only
+20261004100200_web_client_key_excluded_from_growth_and_sweeps.sql	skipped	internal growth dashboard and hosted OAuth sweeps
+20261004100300_assistant_allowance.sql	skipped	hosted web client AI assistant metering (client-api); not part of self-host
+20261005100000_web_push_tables.sql	skipped	hosted web client push notifications (client-api); not part of self-host
+20261005100100_web_push_watch_functions.sql	skipped	hosted web client push notifications (client-api)
+20261005100200_schedule_inbox_watch_dispatch.sql	skipped	pg_cron/Vault job POSTing to the hosted client-api; web client is not part of self-host
+20261005113000_attribute_business_landing_pages.sql	skipped	marketing acquisition attribution (check already a documented parity exception)
