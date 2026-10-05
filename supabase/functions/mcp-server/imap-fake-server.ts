@@ -26,7 +26,8 @@
 // ---------------------------------------------------------------------------
 
 import { ImapClient } from "./imap-client.ts";
-import { parseContentType, parseHeaders } from "./mime.ts";
+import { bytesToByteString } from "./byte-string.ts";
+import { decodeEncodedWords, decodeRawHeaderOctets, parseContentType, parseHeaders } from "./mime.ts";
 import { decodeModifiedUtf7, encodeModifiedUtf7 } from "./utf7.ts";
 
 export interface FakeMessage {
@@ -34,6 +35,14 @@ export interface FakeMessage {
   flags: string[];
   /** The raw RFC 822 message, one character per octet. */
   raw: string;
+  /**
+   * Gmail's ids and labels (X-GM-THRID, X-GM-MSGID, X-GM-LABELS), answered when
+   * a FETCH asks for them and searched by `X-GM-THRID <id>`. Labels are given
+   * as they go on the wire (`\\Inbox`, `"My label"` unquoted here).
+   */
+  gmThreadId?: string;
+  gmMessageId?: string;
+  gmLabels?: string[];
 }
 
 export interface FakeMailbox {
@@ -43,6 +52,8 @@ export interface FakeMailbox {
   messages: FakeMessage[];
   /** STATUS answers NO for this mailbox (and LIST-STATUS leaves it out). */
   statusFails?: boolean;
+  /** When set, STATUS reports it as HIGHESTMODSEQ and a UID STORE bumps it. */
+  modSeq?: number;
 }
 
 export interface FakeServerOptions {
@@ -55,6 +66,8 @@ export interface FakeServerOptions {
   expungedFetch?: "omit" | "no";
   /** Leave the `* n EXISTS` line out of a SELECT reply. */
   omitExists?: boolean;
+  /** `false`: UID MOVE succeeds but reports no COPYUID (a server without UIDPLUS). */
+  uidplus?: boolean;
   /** Runs before a command is answered; may mutate the mailboxes. */
   onCommand?: (command: string, server: FakeImapServer) => void;
   /** A tagged reply ("NO ...") to send INSTEAD of answering, or null. */
@@ -74,6 +87,32 @@ export interface FakeServerOptions {
   stall?: (command: string) => boolean;
   /** How long a read waits for the server before failing. Default 2000. */
   readTimeoutMs?: number;
+  /**
+   * `UID SEARCH` with a HEADER key answers OK with no hits, whatever is asked:
+   * what Migadu does. Added for client-api's `thread` op tests.
+   */
+  headerSearchBroken?: boolean;
+  /**
+   * What Migadu really does (found live 2026-10-04): `HEADER Message-ID`
+   * matches, while a `HEADER References` or `HEADER In-Reply-To` key silently
+   * matches nothing. An OR of the three therefore finds the message itself and
+   * none of its replies.
+   */
+  headerReferencesSearchBroken?: boolean;
+  /**
+   * A search rate limit: after this many UID SEARCH commands (counted across
+   * every connection sharing this options object's `searchCount`), each further
+   * one is answered `NO [LIMIT] ...` and the connection stays open and in sync.
+   */
+  searchLimit?: number;
+  /** Shared counter for `searchLimit`; pass one object to every connection. */
+  searchCount?: { n: number };
+  /** Every UID SEARCH is answered this many milliseconds late. */
+  searchDelayMs?: number;
+  /** `UID SEARCH CHARSET ...` is answered NO [BADCHARSET]. */
+  rejectCharset?: boolean;
+  /** `false`: a `{n}` at the end of a UID SEARCH line is not treated as a literal. */
+  clientLiterals?: boolean;
 }
 
 const CRLF = "\r\n";
@@ -131,6 +170,31 @@ function addressList(value: string | null): string {
     return `(${nstring(m[1]?.trim() ?? "")} NIL ${quote(m[2])} ${quote(m[3])})`;
   }).filter((entry): entry is string => entry !== null);
   return entries.length > 0 ? `(${entries.join("")})` : "NIL";
+}
+
+/** A header value as a person reads it: raw 8-bit octets and RFC 2047 words decoded. */
+function headerText(value: string): string {
+  return decodeEncodedWords(decodeRawHeaderOctets(value));
+}
+
+/** One header field exactly as the message has it, folding included, or null. */
+function rawHeaderField(head: string, name: string): string | null {
+  const lines = head.split(CRLF);
+  const prefix = `${name.toLowerCase()}:`;
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].toLowerCase().startsWith(prefix)) continue;
+    let end = i + 1;
+    while (end < lines.length && /^[ \t]/.test(lines[end])) end++;
+    return lines.slice(i, end).join(CRLF);
+  }
+  return null;
+}
+
+/** The octets of a client literal (one character each) as the UTF-8 text they spell. */
+function literalText(octetString: string): string {
+  const bytes = new Uint8Array(octetString.length);
+  for (let i = 0; i < octetString.length; i++) bytes[i] = octetString.charCodeAt(i) & 0xff;
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 function splitRaw(raw: string): { head: string; body: string } {
@@ -200,6 +264,61 @@ function partOneOf(raw: string): string {
   return body;
 }
 
+/**
+ * A small evaluator for the UID SEARCH keys client-api's `thread` op sends:
+ * `OR a b`, `HEADER <field> <string>`, `SUBJECT <string>`, `SINCE <date>`,
+ * with juxtaposition meaning AND. Returns null for anything else.
+ */
+function searchPredicate(
+  criteria: string,
+  quirks: { headerReferencesSearchBroken?: boolean } = {},
+): ((message: FakeMessage) => boolean) | null {
+  let rest = criteria;
+  const word = (): string => {
+    const arg = takeArgument(rest);
+    rest = arg.rest;
+    return arg.value;
+  };
+  const header = (message: FakeMessage, name: string): string =>
+    (parseHeaders(splitRaw(message.raw).head).get(name.toLowerCase()) ?? []).join(" ");
+  const key = (): ((message: FakeMessage) => boolean) | null => {
+    const name = word().toUpperCase();
+    if (name === "OR") {
+      const a = key();
+      const b = key();
+      return a && b ? (m) => a(m) || b(m) : null;
+    }
+    if (name === "HEADER") {
+      const field = word();
+      const value = word().toLowerCase();
+      if (quirks.headerReferencesSearchBroken && /^(references|in-reply-to)$/i.test(field)) return () => false;
+      return (m) => header(m, field).toLowerCase().includes(value);
+    }
+    if (name === "X-GM-THRID") {
+      const id = word();
+      return (m) => m.gmThreadId === id;
+    }
+    if (name === "SUBJECT") {
+      // Compared as text, the way a server that honours CHARSET does.
+      const value = word().toLowerCase();
+      return (m) => headerText(header(m, "subject")).toLowerCase().includes(value);
+    }
+    if (name === "SINCE") {
+      const at = Date.parse(`${word().replace(/-/g, " ")} 00:00:00 +0000`);
+      return (m) => Date.parse(header(m, "date")) >= at;
+    }
+    if (name === "ALL") return () => true;
+    return null;
+  };
+  const all: Array<(message: FakeMessage) => boolean> = [];
+  while (rest.trim() !== "") {
+    const next = key();
+    if (!next) return null;
+    all.push(next);
+  }
+  return all.length > 0 ? (m) => all.every((p) => p(m)) : null;
+}
+
 export class FakeImapServer {
   /** Every command received, tag stripped, in arrival order. */
   readonly commands: string[] = [];
@@ -214,6 +333,10 @@ export class FakeImapServer {
   readonly #options: FakeServerOptions;
   #inbound: number[] = [];
   #partial = "";
+  /** A command line still being assembled across a client literal. */
+  #pendingLine = "";
+  /** Octets of a client literal still to arrive, or -1 when none is expected. */
+  #literalLeft = -1;
   #wake: (() => void) | null = null;
   #selected: { mailbox: FakeMailbox; uids: number[] } | null = null;
   #heldLogoutTag: string | null = null;
@@ -237,7 +360,8 @@ export class FakeImapServer {
     return {
       write: (p) => {
         if (this.closed) return Promise.reject(new Deno.errors.BadResource("closed"));
-        this.#receive(new TextDecoder("latin1").decode(p));
+        // Exact octets, one character each: a UTF-8 literal survives the trip.
+        this.#receive(bytesToByteString(p));
         return Promise.resolve(p.length);
       },
       read: async (p) => {
@@ -307,9 +431,29 @@ export class FakeImapServer {
     const replies: string[] = [];
     let stalled = false;
     let at: number;
-    while ((at = this.#partial.indexOf(CRLF)) !== -1) {
-      const line = this.#partial.slice(0, at);
+    for (;;) {
+      // A synchronizing literal the client was told to send (RFC 3501 4.3):
+      // its octets join the command line as a quoted string of the text they
+      // spell, so `commands` and the search evaluator read one plain line.
+      if (this.#literalLeft >= 0) {
+        if (this.#partial.length < this.#literalLeft) break;
+        const literal = literalText(this.#partial.slice(0, this.#literalLeft));
+        this.#partial = this.#partial.slice(this.#literalLeft);
+        this.#literalLeft = -1;
+        this.#pendingLine += quote(literal);
+      }
+      if ((at = this.#partial.indexOf(CRLF)) === -1) break;
+      const piece = this.#partial.slice(0, at);
       this.#partial = this.#partial.slice(at + 2);
+      const announced = /\{(\d+)\}$/.exec(piece);
+      if (announced && this.#options.clientLiterals !== false && /^\S+ UID SEARCH /i.test(this.#pendingLine + piece)) {
+        this.#pendingLine += piece.slice(0, announced.index);
+        this.#literalLeft = Number(announced[1]);
+        this.#send(`+ Ready for literal data${CRLF}`);
+        continue;
+      }
+      const line = this.#pendingLine + piece;
+      this.#pendingLine = "";
       const space = line.indexOf(" ");
       const tag = line.slice(0, space);
       const command = line.slice(space + 1);
@@ -329,8 +473,17 @@ export class FakeImapServer {
       this.#late += replies.join("");
       return;
     }
-    this.#send(this.#late + replies.join(""));
+    const out = this.#late + replies.join("");
     this.#late = "";
+    const delay = this.#options.searchDelayMs ?? 0;
+    if (delay > 0 && /^UID SEARCH /i.test(this.commands[this.commands.length - 1] ?? "")) {
+      // A slow search: the server says nothing, then answers.
+      setTimeout(() => {
+        if (!this.closed) this.#send(out);
+      }, delay);
+      return;
+    }
+    this.#send(out);
   }
 
   #wireName(name: string): string {
@@ -346,6 +499,9 @@ export class FakeImapServer {
       UIDNEXT: box.messages.reduce((max, m) => Math.max(max, m.uid), 0) + 1,
       UIDVALIDITY: 1,
     };
+    // Only for a mailbox that opted in (client-api's status tests), and only
+    // ever asked for by `mailboxChangeState`.
+    if (box.modSeq !== undefined) values["HIGHESTMODSEQ"] = box.modSeq;
     const body = items.trim().split(/\s+/).filter((item) => item in values)
       .map((item) => `${item} ${values[item]}`).join(" ");
     const name = this.#options.statusName?.(box.name) ?? box.name;
@@ -366,8 +522,19 @@ export class FakeImapServer {
         continue;
       }
       const parts: string[] = [];
-      for (const item of items.split(/\s+/)) {
-        if (item === "UID") parts.push(`UID ${uid}`);
+      // The one item with a space in it is given a spaceless stand-in first.
+      for (const item of items.replace("BODY.PEEK[HEADER.FIELDS (REFERENCES)]", "REFERENCES-HEADER").split(/\s+/)) {
+        if (item === "REFERENCES-HEADER") {
+          // The field as the message has it, folding and odd whitespace included.
+          const field = rawHeaderField(splitRaw(message.raw).head, "references");
+          const block = field === null ? CRLF : `${field}${CRLF}${CRLF}`;
+          parts.push(`BODY[HEADER.FIELDS (REFERENCES)] {${block.length}}${CRLF}${block}`);
+        } else if (item === "X-GM-THRID") parts.push(`X-GM-THRID ${message.gmThreadId ?? "0"}`);
+        else if (item === "X-GM-MSGID") parts.push(`X-GM-MSGID ${message.gmMessageId ?? "0"}`);
+        else if (item === "X-GM-LABELS") {
+          // System labels go out quoted with the backslash escaped, as Gmail sends them.
+          parts.push(`X-GM-LABELS (${(message.gmLabels ?? []).map((label) => quote(label)).join(" ")})`);
+        } else if (item === "UID") parts.push(`UID ${uid}`);
         else if (item === "FLAGS") parts.push(`FLAGS (${message.flags.join(" ")})`);
         else if (item === "ENVELOPE") parts.push(`ENVELOPE ${envelopeOf(message.raw)}`);
         else if (item === "BODYSTRUCTURE") parts.push(`BODYSTRUCTURE ${bodyStructureOf(message.raw)}`);
@@ -391,6 +558,67 @@ export class FakeImapServer {
     if (verb === "CAPABILITY") {
       const caps = this.#options.capabilities ?? ["IMAP4rev1"];
       return `* CAPABILITY ${caps.join(" ")}${CRLF}` + ok("CAPABILITY completed");
+    }
+
+    // NOOP and UID STORE were added for client-api's session-pool and flag
+    // tests; no mcp-server test sends either.
+    // NOOP is how a client polls the selected mailbox (RFC 3501 6.1.2): the
+    // server delivers what changed since the last command, after which the
+    // session addresses the mailbox as it is now. Arrivals are announced with
+    // `* n EXISTS`; removals just leave the snapshot (a real server sends one
+    // `* n EXPUNGE` each, which no caller here reads).
+    if (verb === "NOOP") {
+      const selected = this.#selected;
+      if (!selected) return ok("NOOP completed");
+      const now = selected.mailbox.messages.map((m) => m.uid).sort((a, b) => a - b);
+      const grew = now.some((uid) => !selected.uids.includes(uid));
+      selected.uids = now;
+      return (grew ? `* ${now.length} EXISTS${CRLF}` : "") + ok("NOOP completed");
+    }
+
+    const store = /^UID STORE (\S+) ([+-])FLAGS(?:\.SILENT)? \(([^)]*)\)$/i.exec(command);
+    if (store) {
+      const selected = this.#selected;
+      if (!selected) return `${tag} BAD No mailbox selected${CRLF}`;
+      const largest = selected.uids[selected.uids.length - 1] ?? 0;
+      const flags = store[3].split(/\s+/).filter(Boolean);
+      for (const uid of parseSet(store[1], largest)) {
+        const message = selected.mailbox.messages.find((m) => m.uid === uid);
+        if (!message) continue;
+        message.flags = store[2] === "+"
+          ? [...new Set([...message.flags, ...flags])]
+          : message.flags.filter((flag) => !flags.includes(flag));
+      }
+      if (selected.mailbox.modSeq !== undefined) selected.mailbox.modSeq += 1;
+      return ok("STORE completed");
+    }
+
+    // UID MOVE (RFC 6851) with COPYUID (RFC 4315), added for client-api's
+    // move / archive / delete tests; no mcp-server test sends it. A server
+    // built with `uidplus: false` moves the same way and reports no COPYUID.
+    const move = /^UID MOVE (\S+) (.+)$/i.exec(command);
+    if (move) {
+      const selected = this.#selected;
+      if (!selected) return `${tag} BAD No mailbox selected${CRLF}`;
+      const target = this.#mailbox(decodeModifiedUtf7(takeArgument(move[2]).value));
+      if (!target) return `${tag} NO [TRYCREATE] Mailbox does not exist${CRLF}`;
+      const largest = selected.uids[selected.uids.length - 1] ?? 0;
+      const from: number[] = [];
+      const to: number[] = [];
+      for (const uid of parseSet(move[1], largest)) {
+        const message = selected.mailbox.messages.find((m) => m.uid === uid);
+        if (!message) continue;
+        const next = target.messages.reduce((max, m) => Math.max(max, m.uid), 0) + 1;
+        selected.mailbox.messages = selected.mailbox.messages.filter((m) => m !== message);
+        target.messages.push({ ...message, uid: next });
+        from.push(uid);
+        to.push(next);
+      }
+      selected.uids = selected.mailbox.messages.map((m) => m.uid).sort((a, b) => a - b);
+      const copyuid = from.length > 0 && this.#options.uidplus !== false
+        ? `* OK [COPYUID 1 ${from.join(",")} ${to.join(",")}] Moved${CRLF}`
+        : "";
+      return copyuid + ok("MOVE completed");
     }
 
     if (verb === "LOGOUT") {
@@ -442,7 +670,17 @@ export class FakeImapServer {
     if (verb === "UID" && /^UID SEARCH /i.test(command)) {
       const selected = this.#selected;
       if (!selected) return `${tag} BAD No mailbox selected${CRLF}`;
-      const criteria = command.slice("UID SEARCH ".length).trim();
+      if (this.#options.searchLimit !== undefined) {
+        const counter = (this.#options.searchCount ??= { n: 0 });
+        counter.n++;
+        if (counter.n > this.#options.searchLimit) return `${tag} NO [LIMIT] Search rate limit exceeded, try again later${CRLF}`;
+      }
+      let criteria = command.slice("UID SEARCH ".length).trim();
+      const charset = /^CHARSET (\S+) /i.exec(criteria);
+      if (charset) {
+        if (this.#options.rejectCharset) return `${tag} NO [BADCHARSET (US-ASCII)] Unsupported charset${CRLF}`;
+        criteria = criteria.slice(charset[0].length);
+      }
       const live = selected.mailbox.messages.slice().sort((a, b) => a.uid - b.uid);
       let hits: FakeMessage[];
       if (criteria === "ALL") hits = live;
@@ -451,7 +689,11 @@ export class FakeImapServer {
       else if (/^UID /.test(criteria)) {
         const wanted = new Set(parseSet(criteria.slice(4), live[live.length - 1]?.uid ?? 0));
         hits = live.filter((m) => wanted.has(m.uid));
-      } else return `${tag} BAD Unsupported search in the fake${CRLF}`;
+      } else {
+        const predicate = searchPredicate(criteria, this.#options);
+        if (!predicate) return `${tag} BAD Unsupported search in the fake${CRLF}`;
+        hits = this.#options.headerSearchBroken && /\bHEADER\b/i.test(criteria) ? [] : live.filter(predicate);
+      }
       return `* SEARCH${hits.map((m) => ` ${m.uid}`).join("")}${CRLF}` + ok("SEARCH completed");
     }
 
