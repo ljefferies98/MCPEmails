@@ -12,7 +12,7 @@ const PASSWORD_TEXT = "This mailbox's password was refused by the mail server. R
 const OAUTH_TEXT = "Access to this mailbox has expired or was revoked. Reconnect it in the dashboard.";
 const AGENT_TEXT = (provider: string) =>
   `Unable to access the ${provider} inbox: its OAuth token has been revoked or expired, so the inbox has been marked 'error'. ` +
-  "Ask the user to reconnect it by opening this link in their browser (they may need to sign in to MCP Emails first): https://mcpemails.com/x";
+  "Ask the user to reconnect it by opening this link in their browser (they may need to sign in to MCPEmails first): https://mcpemails.com/x";
 
 const noHandler: harness.ProviderHandler = (call) => harness.json({ error: `unexpected provider call ${call.url}` }, 500);
 const refuse = () => {
@@ -270,5 +270,22 @@ Deno.test("GET /session: every inbox carries status and status_reason, and no ma
   const none = await handle(request("/mail", { token, body: { op: "list", inbox_id: NO_MAILBOX, args: {} } }));
   assertEquals((await none.json()).error.tool_code, "outlook_no_mailbox");
   assertEquals((seam as unknown as { calls: unknown[] }).calls.length, calls);
+  await pool.closeAll();
+});
+
+// ── a partial connection is not a broken one ────────────────────────────────
+
+Deno.test("send-only inbox: listing mail says it is send-only, never 'reconnect', and dials nothing", async () => {
+  const pool = new FakeDialPool(working);
+  const app = await realApp({ pool });
+  const inbox = await imapInbox({ imap_host: null, imap_port: null });
+  const { value } = await harness.runTool(inbox, noHandler, () => app.mail("list", { folder: "inbox" }));
+  assertEquals(
+    [value.status, value.body.error.code, value.body.error.tool_code],
+    [422, "invalid_request", "transport_not_configured"],
+  );
+  assert(/sending only/.test(value.body.error.message), value.body.error.message);
+  assertEquals(pool.connects, 0, "there is no IMAP server to dial");
+  assertEquals(app.store.loginMarks, [], "nothing is recorded against the row");
   await pool.closeAll();
 });

@@ -1,15 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceRoleClient } from '@/lib/supabase/service';
 import { resolveActiveWorkspaceId } from '@/lib/workspace/active';
 import { encryptToken } from '@/lib/crypto';
 import { checkInboxLimit, inboxExistsForEmail, inboxLimitErrorBody } from '@/lib/plans/check-inbox-limit';
+import { checkConnectTarget, inboxOwnedByOtherBody, privateInboxLimitErrorBody } from '@/lib/inboxes/visibility';
+import { checkPrivateInboxLimit } from '@/lib/plans/check-private-inbox-limit';
+import { recordInboxCapHit } from '@/lib/plans/inbox-cap-events';
+import { syncMailboxAddonForWorkspace } from '@/lib/stripe/mailbox-addon';
 import { findOtherProviderInbox, otherProviderErrorBody } from '@/lib/inboxes/provider-conflict';
 import { validateImapCredential } from '@/lib/email/validate-imap';
 import { validateSmtpCredential } from '@/lib/email/validate-smtp';
 import { yandexLoginUsername } from '@/lib/email/connection-config';
 import { detectTransport, transportPlan } from '@/lib/email/transport-autodetect';
 import { guardMailHost } from '@/lib/email/host-guard';
+import { connectFailureContext } from '@/lib/email/auth-failure-help';
 import { findConflictingInbox } from '@/lib/email/imap-login-collision';
 import { explainAuthFailure } from '@/lib/email/auth-failure';
 import { captureError } from '@/lib/errors/capture';
@@ -23,6 +28,7 @@ import {
   DEFAULT_ZOHO_ACCOUNT_TYPE,
 } from '@/lib/email-providers/imap-presets';
 import { isMicrosoftConsumerAddress, microsoftAccountErrorBody } from '@/lib/email-providers/microsoft-accounts';
+import { isYahooJapanAddress, YAHOO_JAPAN_USE_GENERIC } from '@/lib/email-providers/host-presets';
 
 // ---------------------------------------------------------------------------
 // Route config
@@ -160,6 +166,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (isMicrosoftConsumerAddress(email)) {
     return NextResponse.json(microsoftAccountErrorBody(), { status: 422 });
   }
+  // A Yahoo! JAPAN address on the Yahoo card would send a Yahoo! JAPAN
+  // password to Yahoo's US servers, which can never accept it. Refused before
+  // anything is dialled; the modal points at the generic form instead.
+  if (service === 'yahoo' && isYahooJapanAddress(email)) {
+    return NextResponse.json(
+      {
+        error: 'Yahoo! JAPAN mail is a separate service from Yahoo Mail. Connect it with the generic IMAP form instead.',
+        error_code: YAHOO_JAPAN_USE_GENERIC,
+      },
+      { status: 422 },
+    );
+  }
   // Two different situations, and the client can only say the right thing about
   // either if they are separated. An empty value is a field the user has not
   // filled in; anything shorter than 8 characters is a token that was cut off
@@ -216,7 +234,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 4. Enforce the plan inbox cap for brand-new addresses only (reconnects reuse
   //    the existing row via upsert and must be allowed even at the cap).
-  const alreadyConnected = await inboxExistsForEmail(supabase, workspaceId, email);
+  // Business privacy model: an address already connected in this workspace
+  // as somebody else's PRIVATE inbox is refused, never overwritten (the
+  // upsert below would replace that person's credentials). Read with the
+  // service role, because the RLS read cannot see that row at all.
+  const target = await checkConnectTarget(db, workspaceId, email, user.id);
+  if (!target.ok) {
+    return target.reason === 'owned_by_other'
+      ? NextResponse.json(inboxOwnedByOtherBody(), { status: 409 })
+      : NextResponse.json({ error: 'Failed to save inbox. Please try again.', error_code: 'save_failed' }, { status: 500 });
+  }
+  // The service role here too: a hidden inbox still holds a plan slot.
+  const alreadyConnected = await inboxExistsForEmail(db, workspaceId, email);
   await recordProductFunnelEvent(db, { workspaceId, stage: 'inbox_connection', outcome: 'started', category: funnelProvider(service), phase: 'tcp', connectionType: alreadyConnected ? 'reconnect' : 'first_connect' });
   // Never convert another provider's inbox: the upsert keys on (workspace_id,
   // email_address), so an address connected through Gmail or Outlook OAuth
@@ -229,13 +258,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(otherProviderErrorBody(otherProvider.existingProvider), { status: 409 });
   }
   if (!alreadyConnected) {
-    const inboxLimit = await checkInboxLimit(supabase, workspaceId);
+    const inboxLimit = await checkInboxLimit(supabase, workspaceId, db);
     if (inboxLimit.atLimit) {
       await recordProductFunnelEvent(db, { workspaceId, stage: 'inbox_connection', outcome: 'failure', category: funnelProvider(service), errorCategory: 'plan_limit' });
+      await recordInboxCapHit(workspaceId, inboxLimit);
       // 402 with a stable machine-readable body; the dashboard owns the
       // localised sentence. See inboxLimitErrorBody for why nothing here
       // interpolates the internal plan slug.
       return NextResponse.json(inboxLimitErrorBody(inboxLimit), { status: 402 });
+    }
+    // Business per person: at most ten PRIVATE mailboxes each. A new
+    // connection starts private, so it counts. A reconnect adds nothing.
+    const privateLimit = await checkPrivateInboxLimit({ db, workspaceId, userId: user.id });
+    if (privateLimit.atLimit) {
+      return NextResponse.json(privateInboxLimitErrorBody(privateLimit), { status: 402 });
     }
   }
 
@@ -286,9 +322,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // was never the point: the client picks a short headline from the code and
     // decides whether the fix lives in Advanced settings, and a timeout or TLS
     // failure with no code reads to it exactly like a rejected password.
-    const body: Record<string, string> = {
+    const body: Record<string, string | boolean> = {
       error: validation.message,
       error_code: validation.code.toLowerCase(),
+      // The fix panel's row keys. This route never relays.
+      ...connectFailureContext({ host: imapHost, phase: validation.phase, viaRelay: false }),
     };
     // Which of the credential situations this rejection actually is. The
     // branded providers all mandate an app password, so a bare "wrong
@@ -375,6 +413,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         error: smtpValidation.message,
         error_code: smtpValidation.code.toLowerCase(),
         ...(smtpAuthFailure?.fields ?? {}),
+        ...connectFailureContext({ host: smtpHost, phase: `smtp_${smtpValidation.phase}`, viaRelay: false, imapOk: true }),
       },
       { status: 422 },
     );
@@ -418,6 +457,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { error: upsertError } = await db.from('inboxes').upsert(
     {
       workspace_id: workspaceId,
+      // The person connecting owns it. visibility is left to the column default
+      // (company while business_seat_pricing is off, private when on). A DB
+      // trigger keeps the owner of a live row on reconnect, and gives another
+      // person reconnecting a disconnected address a fresh row.
+      owner_user_id: user.id,
       provider: 'imap',
       service,
       email_address: email,
@@ -462,6 +506,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   await recordProductFunnelEvent(db, { workspaceId, stage: 'inbox_connection', outcome: 'success', category: funnelProvider(service), phase: 'complete', connectionType: alreadyConnected ? 'reconnect' : 'first_connect' });
+  // Business bills mailboxes past ten: bring the add-on quantity in step.
+  // After the response, never awaited by it (src/lib/stripe/mailbox-addon.ts).
+  if (!alreadyConnected) after(() => syncMailboxAddonForWorkspace(workspaceId).then(() => undefined));
   // The same success shape /api/inboxes/imap answers with. A branded card hides
   // its ports rather than showing them, so nobody typed the numbers here, but
   // the autodetect loop can still land somewhere other than the preset (a

@@ -1,5 +1,7 @@
 'use client';
 
+import { SupportHelpLink } from '../components/support/SupportHelpLink';
+
 /**
  * app/error.js
  *
@@ -38,7 +40,7 @@ export default function ErrorPage({ reset }) {
 
         {/* Brand */}
         <div className="auth-brand">
-          <img className="logo-light" src="/logo-wordmark.svg" width="280" height="48" alt="mcpemails" /><img className="logo-dark" src="/logo-wordmark-dark.svg" width="280" height="48" alt="mcpemails" />
+          <img className="logo-light" src="/logo-wordmark.svg" width="280" height="48" alt="MCPEmails" /><img className="logo-dark" src="/logo-wordmark-dark.svg" width="280" height="48" alt="MCPEmails" />
         </div>
 
         {/* Card */}
@@ -93,6 +95,11 @@ export default function ErrorPage({ reset }) {
           <p className="sub">
             An unexpected error occurred. This has been noted and we&rsquo;ll
             look into it. You can try reloading, or head back to the dashboard.
+            If it keeps happening, email{' '}
+            <a href="mailto:support@mcpemails.com" style={{ color: 'var(--brand)' }}>
+              support@mcpemails.com
+            </a>
+            .
           </p>
 
           {/* Primary CTA: retry */}
@@ -166,6 +173,9 @@ export default function ErrorPage({ reset }) {
           >
             Back to homepage
           </a>
+          <SupportHelpLink
+            style={{ display: 'block', marginTop: 14, textAlign: 'center', color: 'var(--fg-3)', fontFamily: 'var(--font-sans)', fontSize: 13 }}
+          />
         </div>
       </div>
     </div>

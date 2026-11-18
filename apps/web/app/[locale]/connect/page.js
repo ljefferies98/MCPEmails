@@ -2,10 +2,13 @@ import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { Link } from '@/i18n/navigation';
 import { metaAlternates, localePath, APP_URL, OG_LOCALE, OG_IMAGE } from '@/i18n/seo';
 import { PROVIDER_CATEGORIES, featuredFirst } from '@/lib/connect/providers.mjs';
+import { providerDisplayName } from '@/lib/connect/display-name.mjs';
+import { categoryLabel } from './category-labels.mjs';
 import { releasedProviders } from '@/lib/connect/release.mjs';
 import { routing } from '@/i18n/routing';
 import { Nav, Footer } from '../../../components/marketing/Sections';
 import { MIcon } from '../../../components/MarketingPrimitives';
+import { requireLocale } from '@/i18n/require-locale';
 
 /**
  * The hub for the provider landing pages.
@@ -26,6 +29,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }) {
   const { locale } = await params;
+  requireLocale(locale);
   const t = await getTranslations({ locale, namespace: 'connect.hub' });
   // The count is whatever is actually public today, not the size of the
   // registry: during the staged rollout those differ, and a description
@@ -40,17 +44,18 @@ export async function generateMetadata({ params }) {
     openGraph: {
       type: 'website',
       url: localePath(locale, '/connect'),
-      title: `${title} · mcpemails`,
+      title: `${title} · MCPEmails`,
       description,
       locale: OG_LOCALE[locale],
       images: [OG_IMAGE],
     },
-    twitter: { card: 'summary_large_image', title: `${title} · mcpemails`, description, images: [OG_IMAGE.url] },
+    twitter: { card: 'summary_large_image', title: `${title} · MCPEmails`, description, images: [OG_IMAGE.url] },
   };
 }
 
 export default async function ConnectHubPage({ params }) {
   const { locale } = await params;
+  requireLocale(locale);
   setRequestLocale(locale);
   const t = await getTranslations({ locale, namespace: 'connect.hub' });
 
@@ -60,8 +65,11 @@ export default async function ConnectHubPage({ params }) {
   // Featured providers (Gmail, Outlook, Microsoft 365) lead their silo;
   // everything else keeps registry order.
   const available = featuredFirst(releasedProviders().filter((p) => p.locales.includes(locale)));
+  // Headings come from category-labels.mjs next to this page; the ids and
+  // anchors (they are URLs) stay in providers.mjs.
   const groups = PROVIDER_CATEGORIES.map((c) => ({
     ...c,
+    label: categoryLabel(c.id, locale),
     providers: available.filter((p) => p.category === c.id),
   })).filter((g) => g.providers.length > 0);
   const verifiedOn = available.find((p) => p.evidence?.verifiedOn)?.evidence.verifiedOn;
@@ -85,7 +93,7 @@ export default async function ConnectHubPage({ params }) {
           itemListElement: available.map((p, i) => ({
             '@type': 'ListItem',
             position: i + 1,
-            name: p.name,
+            name: providerDisplayName(p, locale),
             url: localePath(locale, `/connect/${p.slug}`),
           })),
         },
@@ -94,7 +102,7 @@ export default async function ConnectHubPage({ params }) {
         '@type': 'BreadcrumbList',
         '@id': `${url}#breadcrumb`,
         itemListElement: [
-          { '@type': 'ListItem', position: 1, name: 'mcpemails', item: localePath(locale, '') },
+          { '@type': 'ListItem', position: 1, name: 'MCPEmails', item: localePath(locale, '') },
           { '@type': 'ListItem', position: 2, name: t('title') },
         ],
       },
@@ -114,7 +122,7 @@ export default async function ConnectHubPage({ params }) {
             <p className="pricing-page-lead">{t('lead', { count: available.length })}</p>
             <p className="pricing-page-answer">{t('answer', { count: available.length })}</p>
             {verifiedOn && (
-              <p className="connect-verified" style={{ justifyContent: 'center' }}>
+              <p className="connect-verified">
                 <MIcon name="check" size={13} color="var(--mint-600)" />{' '}
                 {t('verifiedIntro', { date: verifiedOn })}
               </p>
@@ -145,7 +153,7 @@ export default async function ConnectHubPage({ params }) {
                 {g.providers.map((p) => (
                   <li key={p.slug}>
                     <Link href={`/connect/${p.slug}`}>
-                      <span className="connect-index-name">{p.name}</span>
+                      <span className="connect-index-name">{providerDisplayName(p, locale)}</span>
                       {p.imap && <code className="connect-index-host">{p.imap.host}</code>}
                     </Link>
                   </li>
@@ -159,7 +167,7 @@ export default async function ConnectHubPage({ params }) {
           <div className="container">
             <h2>{t('genericTitle')}</h2>
             <p className="sub">{t('genericSub')}</p>
-            <div className="hero-cta" style={{ justifyContent: 'center' }}>
+            <div className="hero-cta">
               <Link className="btn btn-primary btn-lg" href="/connect/imap">{t('genericCta')}</Link>
             </div>
           </div>

@@ -13,9 +13,12 @@
  * THE RULE: the cheapest plan that actually clears the cap that was just hit.
  * Free stops at one inbox, so Personal (three, $5) clears it, and sending
  * someone to $15 Pro to add a second mailbox prices the upgrade far above the
- * problem. Personal itself stops at three, so from there only Pro (unlimited)
- * is a way forward, and offering Personal to a Personal subscriber would sell
- * them the plan they are already on.
+ * problem. Personal itself stops at three, so from there Pro (ten) is the
+ * way forward, and offering Personal to a Personal subscriber would sell them
+ * the plan they are already on. Pro stops at ten for customers who bought
+ * after the 2026-10 cutover, and past ten the only plan is Business (ten
+ * included, then a fixed price per mailbox), so a cap above Personal's sells
+ * Business.
  *
  * Keyed off the CAP rather than off a plan id, because the cap is the server's
  * own number, counted at the moment of the refusal, so it stays right even when
@@ -65,7 +68,7 @@
  * the `dashboard` namespace rather than `dashboardChrome`.
  *
  * @typedef {object} InboxCapPlanOffer
- * @property {'personal'|'solo'} plan  Internal plan id the checkout accepts.
+ * @property {'personal'|'solo'|'pro'} plan  Internal plan id the checkout accepts.
  * @property {string} ctaKey           `dashboardChrome` key: monthly buy label.
  * @property {string} noticeCtaKey     `dashboard` key: the same label on the page notice.
  * @property {string|null} pitchKey    `dashboardChrome` key: one-line pitch on a dual card.
@@ -73,18 +76,43 @@
  * @property {boolean} recommended     The plan this panel steers toward (dual panels only).
  *
  * @param {number|null|undefined} maxInboxes - The cap that was hit.
- * @param {{businessShaped?: boolean}} [context]
+ * @param {{businessShaped?: boolean, seatPricing?: boolean}} [context]
+ *   `seatPricing`: Business is billed per person (`stripePrices.pro.perPerson`,
+ *   only while `business_seat_pricing` is on). The Business offer then uses
+ *   its per-person body, buy label and feature lines instead of the ones that
+ *   quote $39 and "members at no extra cost".
  * @returns {{
  *   plan: string, titleKey: string, bodyKey: string, ctaKey: string,
  *   featureKeys: string[], noticeBodyKey: string, dual: boolean,
  *   offers: InboxCapPlanOffer[],
  * }}
  */
+/** Personal's cap. Any cap above it is Pro's, and Pro's way forward is Business. */
+const PERSONAL_CAP = 3;
+
 export function inboxCapOffer(maxInboxes, context) {
   const atFreeCap = (maxInboxes ?? 1) <= 1;
   // Strictly `true`. A truthy string or a stray object from a caller that
   // wired the prop wrong must not quietly change what a paywall sells.
   const businessShaped = context?.businessShaped === true;
+
+  // Pro's cap (10). Only Business clears it. Keyed to "above Personal's cap"
+  // rather than to 10, so a later change to Pro's cap cannot fall back to
+  // offering Pro to a Pro subscriber.
+  if ((maxInboxes ?? 1) > PERSONAL_CAP) {
+    const seatPricing = context?.seatPricing === true;
+    const business = seatPricing ? businessSeatOffer() : businessOffer();
+    return {
+      plan: business.plan,
+      titleKey: 'connect.businessCapTitle',
+      bodyKey: seatPricing ? 'connect.businessCapBodySeat' : 'connect.businessCapBody',
+      ctaKey: business.ctaKey,
+      featureKeys: [...business.featureKeys],
+      noticeBodyKey: seatPricing ? 'inboxes.capBodyProCapSeat' : 'inboxes.capBodyProCap',
+      dual: false,
+      offers: [business],
+    };
+  }
 
   if (!atFreeCap) {
     const pro = proOffer();
@@ -163,6 +191,40 @@ function proOffer() {
       'connect.featureRateLimit',
       'connect.featureTeam',
       'connect.featureSupport',
+    ],
+  };
+}
+
+function businessOffer() {
+  return {
+    plan: 'pro',
+    ctaKey: 'connect.businessCapCta',
+    noticeCtaKey: 'inboxes.capCtaBusiness',
+    pitchKey: null,
+    recommended: false,
+    // Only what Business does today; see the features note on PLANS.pro.
+    featureKeys: [
+      'connect.businessFeatureInboxes',
+      'connect.businessFeatureMembers',
+      'connect.businessFeatureApprovals',
+      'connect.businessFeatureWorkspaces',
+    ],
+  };
+}
+
+/** Business billed per person: same shape, per-person copy. */
+function businessSeatOffer() {
+  return {
+    plan: 'pro',
+    ctaKey: 'connect.businessCapCtaSeat',
+    noticeCtaKey: 'inboxes.capCtaBusinessSeat',
+    pitchKey: null,
+    recommended: false,
+    featureKeys: [
+      'connect.businessSeatFeaturePrivate',
+      'connect.businessSeatFeatureCompany',
+      'connect.businessFeatureApprovals',
+      'connect.businessSeatFeatureRules',
     ],
   };
 }

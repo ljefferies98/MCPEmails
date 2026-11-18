@@ -1,6 +1,6 @@
 #!/usr/bin/env -S deno run --allow-net --allow-env
 // ============================================================
-// mcpe, MCP Emails self-host CLI
+// mcpe, MCPEmails self-host CLI
 // ============================================================
 // Subcommands:
 //   gen-secrets                 Print a ready-to-use .env (run once, on the host)
@@ -210,7 +210,7 @@ async function cmdGenSecrets() {
   const serviceJwt = await signJwt(jwtSecret, { role: "service_role", iss: "mcpemails-selfhost", iat });
 
   const env = `# ============================================================
-# MCP Emails self-host, generated secrets. KEEP THIS FILE PRIVATE.
+# MCPEmails self-host, generated secrets. KEEP THIS FILE PRIVATE.
 # Use it as .env next to docker-compose.yml, or paste the values into your
 # platform's environment settings (Coolify: Environment Variables).
 # Regenerating ENCRYPTION_KEY makes already-stored credentials undecryptable.
@@ -251,10 +251,16 @@ async function cmdProvisionInbox(flags: Record<string, string | string[]>) {
     die(`--service must be one of: ${VALID_SERVICES.join(", ")}`);
   }
 
-  const imapHost = flags["imap-host"] as string;
-  const smtpHost = flags["smtp-host"] as string;
-  if (!imapHost || imapHost === "true") die("--imap-host is required");
-  if (!smtpHost || smtpHost === "true") die("--smtp-host is required");
+  // Either half may be left out: a receive-only inbox has no SMTP server and a
+  // send-only one has no IMAP server. The missing half is stored as NULL, which
+  // is how the MCP server tells "not part of this inbox" from "broken".
+  const hostFlag = (name: string): string | null => {
+    const value = flags[name];
+    return typeof value === "string" && value !== "true" && value.trim() ? value.trim() : null;
+  };
+  const imapHost = hostFlag("imap-host");
+  const smtpHost = hostFlag("smtp-host");
+  if (!imapHost && !smtpHost) die("give --imap-host, --smtp-host, or both");
 
   let imapPort: number, smtpPort: number, imapSecurity: SecurityMode, smtpSecurity: SecurityMode;
   try {
@@ -288,12 +294,12 @@ async function cmdProvisionInbox(flags: Record<string, string | string[]>) {
         ? flags["display-name"]
         : null,
       imap_host: imapHost,
-      imap_port: imapPort,
+      imap_port: imapHost ? imapPort : null,
       imap_tls: true,
       imap_security: imapSecurity,
       imap_username: username,
       smtp_host: smtpHost,
-      smtp_port: smtpPort,
+      smtp_port: smtpHost ? smtpPort : null,
       smtp_tls: true,
       smtp_security: smtpSecurity,
       imap_password: encrypted,
@@ -308,9 +314,9 @@ async function cmdProvisionInbox(flags: Record<string, string | string[]>) {
     { onConflict: "workspace_id, email_address", ignoreDuplicates: false },
   );
   if (error) die(`failed to save inbox: ${error.message}`);
-  console.log(
-    `✓ connected ${email} (${service}, imap ${imapHost}:${imapPort} ${imapSecurity} / smtp ${smtpHost}:${smtpPort} ${smtpSecurity})`,
-  );
+  const imapPart = imapHost ? `imap ${imapHost}:${imapPort} ${imapSecurity}` : "no imap (send-only)";
+  const smtpPart = smtpHost ? `smtp ${smtpHost}:${smtpPort} ${smtpSecurity}` : "no smtp (receive-only)";
+  console.log(`✓ connected ${email} (${service}, ${imapPart} / ${smtpPart})`);
 }
 
 async function cmdSetSecurity(flags: Record<string, string | string[]>) {
@@ -493,22 +499,24 @@ async function main() {
       await cmdRevokeKey(rest[0]);
       break;
     default:
-      console.log(`mcpe, MCP Emails self-host CLI
+      console.log(`mcpe, MCPEmails self-host CLI
 
   Usage: mcpe <command> [flags]
 
   Commands:
     gen-secrets                              Print a fresh .env to stdout
     provision-inbox --email <addr> \\
-        --imap-host <h> --smtp-host <h> \\
+        [--imap-host <h>] [--smtp-host <h>] \\
         [--imap-port 993] [--smtp-port 465] \\
         [--imap-security tls|starttls] \\
         [--smtp-security tls|starttls] \\
         [--username <u>] [--service generic] \\
         [--display-name <n>]                 Connect an IMAP/SMTP mailbox
                                              (password via IMAP_PASSWORD env;
-                                             security defaults from the port:
-                                             993/465 tls, 143/587/25 starttls)
+                                             one host alone makes it receive-
+                                             or send-only; security defaults
+                                             from the port: 993/465 tls,
+                                             143/587/25 starttls)
     set-security --inbox <addr|id> \\
         [--imap-security tls|starttls] \\
         [--smtp-security tls|starttls]       Change an inbox's TLS mode

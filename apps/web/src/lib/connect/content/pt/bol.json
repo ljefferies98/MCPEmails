@@ -1,0 +1,98 @@
+{
+  "_sources": [
+    "https://autoconfig.thunderbird.net/v1.1/bol.com.br",
+    "https://en.wikipedia.org/wiki/Brasil_Online"
+  ],
+  "auth": {
+    "method": "account-password",
+    "label": "Senha do BOL",
+    "helpUrl": null,
+    "usernameForm": "Seu endereço completo, name@bol.com.br. Se for recusado, tente o login sozinho, sem o domínio: a entrada do BOL no banco de dados da Mozilla registra o nome de usuário nessa forma mais curta.",
+    "status": "active"
+  },
+  "meta": {
+    "title": "BOL Mail no Claude: IMAP em imap.bol.com.br",
+    "description": "Conecte uma caixa de correio do BOL ao Claude ou a qualquer cliente MCP em imap.bol.com.br:993 com sua senha do BOL. O envio é por smtps.bol.com.br na porta 465, que não é a configuração do serviço irmão UOL."
+  },
+  "hero": {
+    "eyebrow": "BOL Mail + IA",
+    "titleLine1": "Conecte o BOL Mail ao Claude,",
+    "titleLine2": "ao Cursor, ao ChatGPT e a qualquer cliente MCP",
+    "lead": "Dê ao seu agente de IA uma caixa de entrada real do BOL. Leia, pesquise, envie, responda, agende e organize e-mails via IMAP com sua senha comum do BOL e as configurações verificadas nesta página.",
+    "answer": "O Claude não consegue acessar o BOL Mail sozinho. O MCPEmails é um servidor MCP hospedado que o conecta via IMAP em imap.bol.com.br na porta 993, autenticando com sua senha do BOL, para que o Claude, o Cursor ou qualquer cliente MCP consiga ler, pesquisar, enviar e organizar esses e-mails. O BOL é operado pelo UOL na mesma plataforma de e-mail, e as configurações parecem próximas o bastante das do UOL para copiar, que é de onde vem a maioria dos erros: o servidor de saída do BOL usa TLS implícito na porta 465, enquanto o do UOL usa STARTTLS na 587. Não há senha de app nem nada para gerar. Uma caixa de entrada no MCPEmails é grátis.",
+    "meta0": "1 caixa de entrada grátis, para sempre",
+    "meta1": "Sua senha do BOL, sem senha de app",
+    "meta2": "E-mails buscados ao vivo, nunca armazenados"
+  },
+  "method": {
+    "title": "Como o BOL Mail se conecta: IMAP e SMTP na plataforma do UOL",
+    "body": "O BOL serve IMAP em <code>imap.bol.com.br</code> na porta 993 com TLS implícito, e o envio em <code>smtps.bol.com.br</code> na porta 465, também com TLS implícito. O BOL é operado pelo UOL, e o servidor por trás dos dois é a mesma instalação Dovecot que o UOL usa, com o mesmo limite de tamanho de mensagem e a mesma nomenclatura. A autenticação é comum. Não há senha de app nem código de autorização separado, só sua senha do BOL, com o endereço completo como nome de usuário. O único detalhe é a forma do nome de usuário: a entrada de autoconfiguração da Mozilla para bol.com.br, que o Thunderbird e outros clientes usam para preencher as configurações, registra o login como a parte antes do @ e não o endereço inteiro, então, se o endereço completo for recusado, a forma curta é a próxima coisa a tentar. Os hosts e portas desta página foram confirmados em uma conexão TLS ao vivo, e a tabela de configurações mostra a data."
+  },
+  "setup": [
+    {
+      "h": "Crie sua conta grátis no MCPEmails",
+      "p": "Crie sua conta em mcpemails.com. O plano gratuito conecta uma caixa de entrada e continua grátis, sem cartão. Deixe a página aberta; o lado do BOL leva cerca de um minuto."
+    },
+    {
+      "h": "Confira se a caixa de correio abre no webmail do BOL",
+      "p": "Entre no webmail do BOL com o endereço e a senha que pretende usar. Se o próprio webmail recusar a senha, nenhum cliente de e-mail vai aceitá-la também, então redefina a senha lá primeiro. Uma caixa de correio que abre normalmente no webmail está pronta para conectar."
+    },
+    {
+      "h": "Digite seu endereço e senha no MCPEmails",
+      "p": "Escolha IMAP / SMTP e digite o endereço completo, como <code>nome@bol.com.br</code>, junto com sua senha do BOL. Os hosts e portas já vêm preenchidos e foram confirmados em uma conexão TLS ao vivo. Repare na porta de saída: o BOL usa TLS implícito na 465, o que não é a mesma configuração do serviço irmão dele."
+    },
+    {
+      "h": "Cole a URL do MCP no seu cliente de IA",
+      "p": "Cole https://mcpemails.com/api/mcp no Claude, no Cursor ou no ChatGPT, autorize, e seu agente consegue ler, pesquisar, enviar, responder, encaminhar, agendar e organizar a caixa de correio do BOL."
+    }
+  ],
+  "gotchas": [
+    {
+      "h": "O nome de usuário pode ser o login sem o domínio",
+      "p": "A maioria dos provedores espera o endereço inteiro no campo de nome de usuário, e essa é a forma a tentar primeiro. A entrada de autoconfiguração da Mozilla para bol.com.br, a que os clientes de e-mail usam para configurar o BOL automaticamente, registra o nome de usuário só como a parte local, o login sem <code>@bol.com.br</code>. Se o endereço completo for rejeitado exatamente como uma senha errada seria, trocar para a forma curta é um teste de dez segundos que vale fazer antes de redefinir qualquer coisa. O UOL documenta as mesmas duas formas para as caixas de correio dele."
+    },
+    {
+      "h": "As configurações do UOL parecem próximas o bastante para copiar, e a porta SMTP é diferente",
+      "p": "O BOL é operado pelo UOL na mesma plataforma, e os dois conjuntos de configurações são parecidos o suficiente para as pessoas trocarem um pelo outro. O transporte é onde isso quebra. O host de envio do BOL usa <b>TLS implícito na porta 465</b>. O do UOL usa <b>STARTTLS na porta 587</b>. Os dois hosts têm o mesmo prefixo <code>smtps</code>, então o nome não dá nenhum aviso. Usar a combinação errada normalmente trava em vez de dar erro, porque um cliente que espera um handshake TLS em uma porta de texto simples fica aguardando uma saudação que nunca chega."
+    },
+    {
+      "h": "Sem MOVE, sem SPECIAL-USE, e pastas localizadas pelo nome",
+      "p": "O servidor IMAP do BOL não anuncia a extensão MOVE, então arquivar uma mensagem roda como uma cópia, uma atualização de flag e um expunge em vez de um único comando atômico, e uma conexão perdida no meio pode deixar a mensagem brevemente nas duas pastas. Ele também omite SPECIAL-USE, então as pastas são localizadas pelo nome e não pela função. Se a caixa de correio usa nomes de pasta em português, como Enviados, Rascunhos ou Lixeira, o MCPEmails ainda os reconhece, e se seu agente arquivar algo no lugar errado, informe a pasta de destino na instrução."
+    }
+  ],
+  "limits": [
+    "O próprio BOL decide quais caixas de correio têm acesso por clientes. Se uma senha correta é recusada aqui e em todos os outros programas de e-mail, a restrição está do lado do BOL e o MCPEmails não consegue contornar.",
+    "Não há suporte a IDLE, então os e-mails são consultados periodicamente em vez de enviados por push. Seu agente vê uma mensagem nova na próxima verificação, não no momento em que ela chega.",
+    "O servidor SMTP aceita mensagens de até cerca de 33 MB. Um encaminhamento com anexos maiores é recusado na hora do envio, não colocado em fila."
+  ],
+  "faq": [
+    {
+      "q": "O Claude funciona com o e-mail do BOL?",
+      "a": "Não diretamente. O Claude não tem um conector integrado para o BOL e não consegue abrir uma conexão IMAP sozinho, então precisa de um servidor MCP como o MCPEmails na frente da caixa de correio. Essa conexão é via IMAP em imap.bol.com.br e dá ao Claude acesso para ler, pesquisar, enviar, responder, encaminhar, agendar e organizar. A mesma conexão funciona no Cursor, no ChatGPT e em outros clientes MCP."
+    },
+    {
+      "q": "Quais são as configurações de IMAP e SMTP do BOL?",
+      "a": "O IMAP é imap.bol.com.br na porta 993 com TLS implícito. O envio é smtps.bol.com.br na porta 465, também com TLS implícito. Faça login com seu endereço bol.com.br e sua senha do BOL. Os dois hosts foram verificados em uma conexão TLS ao vivo na data mostrada nesta página."
+    },
+    {
+      "q": "Por que minha senha do BOL não funciona em um cliente de e-mail?",
+      "a": "Primeiro confirme que a senha abre o webmail do BOL; se não abrir, redefina a senha lá. Se abrir, tente o nome de usuário sem a parte do domínio, já que a entrada pública de autoconfiguração do BOL registra o login nessa forma mais curta. Se as duas formas forem recusadas em todos os programas de e-mail, a caixa de correio não tem acesso por clientes do lado do BOL, e só o BOL pode mudar isso."
+    },
+    {
+      "q": "O BOL é a mesma coisa que o UOL?",
+      "a": "O BOL é operado pelo UOL e roda na mesma plataforma de e-mail, mas são serviços separados, com caixas de correio, hostnames e configurações separados. Em especial, a porta de saída e a criptografia diferem entre os dois, então copiar uma configuração para a outra não funciona."
+    },
+    {
+      "q": "O BOL precisa de senha de app?",
+      "a": "Não. O BOL não tem esquema de senha específica de app e não emite código de autorização separado. Sua senha comum do BOL autentica tanto o IMAP quanto o SMTP. Isso também significa que trocar sua senha do BOL quebra qualquer cliente conectado até você atualizar a credencial armazenada."
+    },
+    {
+      "q": "Meu e-mail do BOL fica armazenado nos seus servidores?",
+      "a": "Não. As mensagens são buscadas ao vivo no BOL via IMAP a cada solicitação e repassadas ao seu cliente de IA. As credenciais são criptografadas em repouso, e o conteúdo das mensagens não é retido depois da solicitação que o pediu."
+    }
+  ],
+  "ctaBand": {
+    "title": "Dê à sua IA uma caixa de entrada do BOL",
+    "sub": "Conecte uma caixa de correio do BOL em minutos. Uma caixa de entrada grátis para sempre no MCPEmails, sem cartão."
+  }
+}

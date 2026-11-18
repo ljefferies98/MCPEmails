@@ -27,7 +27,7 @@ const { getAllPosts, getLocalizedPost } = await import('./posts.js');
 
 // Mirrors routing.locales in src/i18n/routing.ts. Untranslated locales fall
 // back to English content, so every post renders in every locale.
-const LOCALES = ['en', 'nb', 'es', 'fr', 'zh'];
+const LOCALES = ['en', 'nb', 'es', 'fr', 'zh', 'de', 'pt', 'ja'];
 
 const attrs = (html, name) => [...html.matchAll(new RegExp(`\\s${name}="([^"]*)"`, 'g'))].map((m) => m[1]);
 
@@ -48,6 +48,15 @@ test('renderMarkdown gives repeated and symbol-only headings unique, non-empty i
     ['setup', 'setup-2', 'setup-3', 'section', 'section-2', 'setup-2-2'],
   );
   assert.deepEqual(attrs(html, 'id'), headings.map((h) => h.id));
+});
+
+test('renderMarkdown turns a pipe table into a scrollable table with a header row', () => {
+  const { html } = renderMarkdown('| Option | Sends |\n| --- | --- |\n| **A** | yes |\n| [B](/docs) | no |\n\nAfter.');
+  assert.ok(html.startsWith('<div class="blog-table-wrap"><table><thead><tr><th>Option</th><th>Sends</th></tr></thead>'));
+  assert.ok(html.includes('<tbody><tr><td><strong>A</strong></td><td>yes</td></tr><tr><td><a href="/docs">B</a></td><td>no</td></tr></tbody></table></div>'));
+  assert.ok(html.endsWith('<p>After.</p>'));
+  // A lone pipe line with no separator row is still a paragraph.
+  assert.equal(renderMarkdown('| not | a table').html, '<p>| not | a table</p>');
 });
 
 for (const { slug } of getAllPosts()) {

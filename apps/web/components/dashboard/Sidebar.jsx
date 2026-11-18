@@ -22,7 +22,7 @@ import { Link } from '@/i18n/navigation';
  *   - `onClose` is called when the user taps the overlay backdrop.
  *   - Clicking a nav item also calls `onClose` so the drawer closes.
  */
-export function Sidebar({ route, setRoute, counts, user, workspace, workspaces = [], activeWorkspaceId, canCreateWorkspace = false, isOpen, onClose }) {
+export function Sidebar({ route, setRoute, counts, user, workspace, workspaces = [], activeWorkspaceId, canCreateWorkspace = false, referralVisible = false, isOpen, onClose }) {
   const tr = useTranslations('dashboardChrome');
   const router = useRouter();
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
@@ -139,9 +139,12 @@ export function Sidebar({ route, setRoute, counts, user, workspace, workspaces =
         className={'sidebar' + (isOpen ? ' sidebar-open' : '')}
         aria-label="Dashboard navigation"
       >
-        <div className="brand">
-          <img className="logo-light" src="/logo-wordmark.svg" alt="mcpemails" /><img className="logo-dark" src="/logo-wordmark-dark.svg" alt="mcpemails" />
-        </div>
+        {/* A plain link, not next/link: the homepage only stays put for a
+            signed-in visitor when the request carries this page as its Referer
+            (src/lib/home-redirect.ts), and a full page load sends it. */}
+        <a className="brand" href="/">
+          <img className="logo-light" src="/logo-wordmark.svg" alt="MCPEmails" /><img className="logo-dark" src="/logo-wordmark-dark.svg" alt="MCPEmails" />
+        </a>
 
         {/* Workspace switcher */}
         <div className="ws-switcher" ref={wsRef}>
@@ -272,7 +275,38 @@ export function Sidebar({ route, setRoute, counts, user, workspace, workspaces =
               <span>{it.label}</span>
             </a>
           ))}
+          {/* A dashboard section like the others: /dashboard/help renders the
+              help center inside the app shell, with SPA navigation and the
+              active state. The public /help page is unchanged. */}
+          <a href={sectionToPath('help')}
+             className={"nav-item" + (route === 'help' ? " active" : "")}
+             aria-current={route === 'help' ? "page" : undefined}
+             onClick={e => handleNavClick(e, 'help')}>
+            <Icon name="mail" size={16} />
+            <span>{tr('sidebar.navHelp')}</span>
+          </a>
         </nav>
+
+        {/* The referral program, while workspaces.referral_enabled is on (the
+            dashboard page hands that flag down as `referralVisible`). Pinned
+            above the account footer rather than ninth in the workspace list,
+            where a paying customer never looked: 676 codes, 0 referrals by
+            2026-11-11. Same Invite page, same route, one entry. Dashboard
+            only: never in tool results, the draft card or directory text. */}
+        {referralVisible ? (
+          <a
+            href={sectionToPath('invite')}
+            className={"nav-item invite-promo" + (route === 'invite' ? " active" : "")}
+            aria-current={route === 'invite' ? "page" : undefined}
+            onClick={e => handleNavClick(e, 'invite')}
+          >
+            <Icon name="gift" size={16} color="var(--brand)" className="invite-promo-icon" />
+            <span className="invite-promo-text">
+              <span className="invite-promo-title">{tr('sidebar.navInvite')}</span>
+              <span className="invite-promo-sub">{tr('sidebar.invitePromo')}</span>
+            </span>
+          </a>
+        ) : null}
 
         <div className="footer-user">
           <Avatar initials={user?.initials ?? '?'} />
@@ -280,6 +314,13 @@ export function Sidebar({ route, setRoute, counts, user, workspace, workspaces =
             <div style={{ fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600, color: "var(--fg-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {user?.displayName || user?.email || tr('sidebar.accountFallback')}
             </div>
+            {/* The email is what tells two accounts apart: Google gives every
+                account of one person the same display name. */}
+            {user?.displayName && user?.email && user.displayName !== user.email ? (
+              <div className="footer-user-email" title={user.email} style={{ fontFamily: "var(--font-sans)", fontSize: 11.5, color: "var(--fg-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {user.email}
+              </div>
+            ) : null}
             {/* Already the effective plan: the dashboard page resolves it
                 through effective_workspace_plan() before it becomes
                 `workspace.plan`. This is the label the switcher above now
@@ -373,8 +414,10 @@ export function Topbar({ route, workspace, mcpUrl, onMenuOpen, onOpenSearch, sid
     workflows: 'Workflows',
     approvals: tr('sidebar.navApprovals'),
     automations: tr('sidebar.navAutomations'),
+    invite: tr('sidebar.navInvite'),
     settings: tr('sidebar.navSettings'),
     security: tr('sidebar.navSecurity'),
+    help:     tr('sidebar.navHelp'),
   };
   return (
     <header className="topbar">

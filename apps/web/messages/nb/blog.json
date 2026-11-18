@@ -1,9 +1,9 @@
 {
   "meta": {
-    "title": "Blogg",
+    "title": "Guider til AI-agenter for e-post, MCP og sikkerhet",
     "description": "Veiledninger om AI-agenter, MCP og hvordan du kobler Gmail, Outlook, Fastmail og andre IMAP-innbokser til Claude, Cursor og MCP-klienter."
   },
-  "blogName": "mcpemails-bloggen",
+  "blogName": "MCPEmails-bloggen",
   "index": {
     "eyebrow": "MCPEmails-bloggen",
     "title": "Notater om agenter, e-post og MCP",
@@ -25,6 +25,7 @@
       "sub": "Koble Gmail, Outlook, Fastmail eller en hvilken som helst IMAP-konto til AI-agenten din på minutter.",
       "primary": "Kom i gang gratis",
       "secondary": "Les dokumentasjonen"
-    }
+    },
+    "breadcrumbAria": "Brødsmulesti"
   }
 }

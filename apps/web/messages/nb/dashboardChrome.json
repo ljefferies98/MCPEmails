@@ -3,6 +3,7 @@
     "connectedSuccess": "{provider}-innboks koblet til.",
     "inboxLimitReached": "Du har nådd innboksgrensen på {plan}. Oppgrader for å koble til flere postkasser.",
     "tokenExchangeFailed": "Kunne ikke koble til innboksen. Token-utvekslingen med leverandøren mislyktes. Prøv igjen.",
+    "gmailOauthUnavailable": "Pålogging med Google er ikke tilgjengelig for en ny Gmail-innboks i dette arbeidsområdet. Koble til Gmail med et app-passord i stedet. Det fungerer på alle abonnementer.",
     "connectionCancelled": "Tilkobling av innboks avbrutt.",
     "adminConsentRequired": "Organisasjonen din må godkjenne postkassetilgang før du kan koble til Outlook. Microsoft hindrer ansatte i å godkjenne det selv.",
     "adminConsentAction": "Få en lenke til IT-ansvarlig",
@@ -10,10 +11,13 @@
     "adminConsentGrantedAction": "Koble til Outlook",
     "adminConsentFailed": "Microsoft bekreftet ikke godkjenningen, så Outlook er fortsatt blokkert. Godkjenningen krever en administratorkonto i Microsoft 365; send godkjenningslenken til IT-ansvarlig.",
     "adminConsentFailedAction": "Få godkjenningslenken",
-    "outlookEmailMissing": "Microsoft-kontoen din ga oss ingen e-postadresse, så vi kunne ikke koble den til. Prøv en annen Microsoft-konto, eller kontakt support på hello@mcpemails.com.",
+    "outlookEmailMissing": "Microsoft-kontoen din ga oss ingen e-postadresse, så vi kunne ikke koble den til. Prøv en annen Microsoft-konto, eller kontakt support på support@mcpemails.com.",
     "inboxExistsOtherProvider": "Den adressen er allerede koblet til med en annen metode (for eksempel IMAP, Gmail eller Outlook), så vi rørte ikke den innboksen. Vil du bytte tilkoblingsmetode, må du først fjerne den innboksen og så koble den til på nytt.",
-    "outlookNoMailbox": "Denne Microsoft-kontoen har ingen Outlook-postkasse (Exchange Online), så det er ingenting å koble til. Det er vanlig for administratorkontoer uten Exchange-lisens, eller når organisasjonens e-post ligger hos en annen leverandør. Ligger e-posten din på en annen server, kobler du adressen til med IMAP i stedet.",
+    "inboxOwnedByOther": "Noen andre i arbeidsområdet har allerede koblet til den adressen som en privat innboks, så ingenting ble endret.",
+    "privateInboxLimitReached": "Du har allerede så mange private innbokser som hver person kan ha. Gjør én av dem tilgjengelig for hele bedriften, og koble deretter til denne.",
+    "outlookNoMailbox": "Denne Microsoft-kontoen har ingen Outlook-postkasse (Exchange Online), så det er ingenting å koble til. Det er vanlig for administratorkontoer uten Exchange-lisens, eller når organisasjonens e-post ligger hos en annen leverandør. Ligger e-posten din på en annen server, kobler du adressen til med IMAP i stedet. Logget inn med feil Microsoft-konto? Koble til Outlook på nytt og velg riktig konto.",
     "connectionFailed": "Tilkobling av innboks mislyktes ({error}). Prøv igjen.",
+    "contactSupport": "Kontakt kundestøtte",
     "checkoutSuccess": "Velkommen til {plan}. Abonnementet ditt aktiveres nå; dette kan ta et øyeblikk.",
     "checkoutSuccessPlanFallback": "det nye abonnementet ditt",
     "checkoutFeedback": {
@@ -36,6 +40,8 @@
     "checkoutPanel": {
       "title": "Du er nå på {plan}",
       "subtitle": "Betalingen er mottatt. Kvitteringen er på vei til e-posten din.",
+      "subtitleEur": "Abonnementet er aktivt. Hvis du betalte med bankbelastning, kan det ta noen virkedager før den er gjennomført, og du har full tilgang i mellomtiden.",
+      "subtitleProcessing": "Bankbelastningen behandles, og det kan ta noen virkedager. Du har full tilgang i mellomtiden.",
       "close": "Lukk",
       "planLabel": "Abonnement",
       "priceLabel": "Pris",
@@ -51,6 +57,7 @@
       "activatingTitle": "Nesten i mål",
       "activating": "Abonnementet aktiveres nå. Det tar noen sekunder, og siden oppdateres av seg selv.",
       "activatingSlow": "Betalingen gikk gjennom. Aktiveringen tar lengre tid enn vanlig. Last inn siden på nytt om litt hvis den fortsatt ser uendret ut.",
+      "activatingSlowNeutral": "Aktiveringen tar lengre tid enn vanlig. Last inn siden på nytt om litt hvis den fortsatt ser uendret ut.",
       "billingDetailsNote": "Pris og fornyelsesdato finner du under Fakturering.",
       "connectCta": "Koble til en innboks til",
       "billingCta": "Gå til fakturering"
@@ -69,6 +76,8 @@
     "connectionHealthy": "Tilkoblingen er i orden.",
     "inboxConnectedSuccess": "{label} koblet til.",
     "inboxConnectedAdjusted": "{label} koblet til. Serveren din godtok IMAP {imapPort} ({imapSecurity}) og SMTP {smtpPort} ({smtpSecurity}), så det er det vi lagret.",
+    "inboxConnectedAdjustedImap": "{label} koblet til. Serveren din godtok IMAP {imapPort} ({imapSecurity}), så det er det vi lagret.",
+    "inboxConnectedAdjustedSmtp": "{label} koblet til. Serveren din godtok SMTP {smtpPort} ({smtpSecurity}), så det er det vi lagret.",
     "apiKeyRevokeFailed": "Kunne ikke tilbakekalle API-nøkkelen.",
     "apiKeyRevoked": "API-nøkkel tilbakekalt.",
     "apiKeyCreateFailed": "Kunne ikke opprette API-nøkkelen.",
@@ -89,9 +98,17 @@
     "densityLabel": "Tetthet",
     "densityCompact": "Kompakt",
     "densitySpacious": "Romslig",
-    "firstRunTitle": "Velkommen til mcpemails",
+    "firstRunTitle": "Velkommen til MCPEmails",
     "firstRunBody": "Koble til din første innboks for å få et fungerende MCP-endepunkt på under ett minutt.",
     "firstRunCta": "Koble til innboks",
+    "paymentIssueDeclined": "Den siste betalingen din gikk ikke gjennom. Planen din er fortsatt aktiv mens vi prøver på nytt.",
+    "paymentIssueDeclinedCta": "Oppdater betaling",
+    "paymentIssueConfirm": "Banken din vil at du skal bekrefte den siste betalingen. Planen din er fortsatt aktiv.",
+    "paymentIssueConfirmCta": "Bekreft betaling",
+    "inboxAlertOne": "{address} må kobles til på nytt. Innloggingen virker ikke lenger, så AI-appen din kan ikke lese, skrive utkast eller sende fra den.",
+    "inboxAlertMany": "{count} innbokser må kobles til på nytt. Innloggingen virker ikke lenger, så AI-appen din kan ikke bruke dem.",
+    "inboxAlertReconnect": "Koble til på nytt",
+    "inboxAlertOpenInboxes": "Åpne innbokser",
     "inviteSentNotDelivered": "Invitasjonen til {email} ble opprettet, men e-posten kunne ikke sendes. Bruk Send på nytt på den ventende invitasjonen.",
     "inviteResent": "Invitasjonen ble sendt på nytt til {email}.",
     "inviteResendFailed": "Kunne ikke sende invitasjonen på nytt.",
@@ -103,7 +120,7 @@
     "workspacesLabel": "Arbeidsområder",
     "memberSuffix": "medlem",
     "newWorkspace": "Nytt arbeidsområde",
-    "newWorkspaceUpsell": "Arbeidsområder er en Team-funksjon. Se abonnementene",
+    "newWorkspaceUpsell": "Arbeidsområder er en Business-funksjon. Se abonnementene",
     "sectionWorkspace": "Arbeidsområde",
     "sectionAccount": "Konto",
     "navOverview": "Oversikt",
@@ -114,6 +131,7 @@
     "navApprovals": "Godkjenninger",
     "navSettings": "Innstillinger",
     "navSecurity": "Sikkerhet",
+    "navHelp": "Hjelp og kundestøtte",
     "accountFallback": "Konto",
     "signOut": "Logg ut",
     "openMenu": "Åpne navigasjonsmenyen",
@@ -122,7 +140,9 @@
     "searchPlaceholder": "Søk i sider, innbokser, medlemmer…",
     "openSearch": "Åpne søk (Command K)",
     "navWorkflows": "Arbeidsflyter",
-    "navAutomations": "Automatiseringer"
+    "navAutomations": "Automatiseringer",
+    "navInvite": "Inviter en venn",
+    "invitePromo": "Gi en måned, få en måned"
   },
   "topbar": {
     "mcpLabel": "MCP-endepunkt",
@@ -132,7 +152,7 @@
   },
   "connect": {
     "subOutlook": "Outlook.com · Microsoft 365",
-    "hintOutlook": "Outlook.com-, Hotmail-, Live- og MSN-kontoer logger på med en gang. En Microsoft 365-konto fra jobb eller skole kan trenge at IT-administratoren godkjenner MCP Emails én gang; de trenger ikke en MCP Emails-konto for å gjøre det.",
+    "hintOutlook": "Outlook.com-, Hotmail-, Live- og MSN-kontoer logger på med en gang. En Microsoft 365-konto fra jobb eller skole kan trenge at IT-administratoren godkjenner MCPEmails én gang; de trenger ikke en MCPEmails-konto for å gjøre det.",
     "subFastmail": "App-passord",
     "subAppPassword": "App-passord",
     "subGeneric": "Alle postkasser · anbefalt",
@@ -145,6 +165,10 @@
     "errorPasswordRequired": "Et app-passord er påkrevd.",
     "errorHostRequired": "IMAP- og SMTP-vert er påkrevd.",
     "errorPortRequired": "IMAP- og SMTP-porter er påkrevd.",
+    "errorImapHostRequired": "IMAP-vert er påkrevd.",
+    "errorSmtpHostRequired": "SMTP-vert er påkrevd.",
+    "errorImapPortRequired": "IMAP-port er påkrevd.",
+    "errorSmtpPortRequired": "SMTP-port er påkrevd.",
     "errorPortRange": "Den porten kan vi ikke koble til på. E-postservere bruker 143 eller 993 for IMAP, og 25, 465 eller 587 for SMTP.",
     "errorPortNotAllowedShort": "Den porten kan vi ikke koble til på.",
     "errorHostNotAllowedShort": "Den serveren ligger på et privat nettverk.",
@@ -170,16 +194,21 @@
     "errorSecurityShort": "Sikkerhetsmodusen passer ikke med porten.",
     "errorLoginTakenShort": "Denne postkasseinnloggingen er allerede koblet til.",
     "errorInboxOtherProviderShort": "Den adressen er allerede koblet til med en annen metode. Fjern den innboksen først for å bytte.",
+    "errorInboxOwnedByOtherShort": "Noen andre i arbeidsområdet har allerede koblet til denne adressen som en privat innboks.",
+    "errorPrivateInboxLimitShort": "Du har allerede så mange private innbokser som hver person kan ha. Gjør én tilgjengelig for hele bedriften først.",
     "errorProtocolShort": "E-postserveren sendte et uventet svar.",
     "errorHostNotFoundShort": "Det servernavnet finnes ikke.",
     "errorWhatToCheck": "Hva du bør sjekke",
+    "errorContactSupport": "Står du fast? Kontakt kundestøtte",
     "errorRepeatHint": "Samme resultat to ganger. Sjekk brukernavnet, passordet og sikkerhetsmodusen før du prøver igjen.",
     "errorAuthImapDisabled": "IMAP-tilgang er slått av for denne postkassen.",
     "errorAuthAppPassword": "{provider} godtar ikke det vanlige passordet ditt her.",
     "errorAuthAccountPassword": "Dette ser ut som det vanlige passordet ditt, ikke et app-passord fra {provider}.",
     "errorAuthAppPasswordLength": "Dette er ikke et fullstendig app-passord fra {provider}.",
     "errorAuthLoginName": "E-postserveren kjente ikke igjen det brukernavnet.",
+    "errorAuthProviderRefused": "E-postleverandøren avviste denne påloggingen, og ikke på grunn av passordet.",
     "imapDisabledDetail": "Slå på IMAP-tilgang i innstillingene til e-postkontoen din, og koble til på nytt. Ingen passord virker før den er på.",
+    "providerRefusedDetail": "Leverandøren din avviste selv denne påloggingen, og det er ikke slik den svarer på feil passord. Noen leverandører avviser pålogginger som kommer fra servere som våre, selv når passordet er riktig. Vi har registrert forsøket og ser på saken, så du trenger ikke å bytte passord eller prøve på nytt.",
     "appPasswordRequiredDetail": "Et app-passord er en egen legitimasjon du genererer i kontoinnstillingene. Totrinnsbekreftelse må være slått på før valget dukker opp.",
     "appPasswordAccountDetail": "Et app-passord blir generert for deg, aldri valgt, så det inneholder verken store bokstaver, sifre eller tegnsetting. Generer ett og lim det inn her; det vanlige passordet ditt kan ikke virke.",
     "appPasswordLengthDetail": "Et app-passord fra {provider} er 16 tegn. Sjekk om kopien ble avkortet, og lim inn hele.",
@@ -226,14 +255,14 @@
     "businessUpgradeTitle": "Koble til resten av bedriftens postkasser",
     "businessUpgradeBody": "Håndterer du post@, salg@ og faktura@ for bedriften din? Gratis kobler til én postkasse. Velg planen som dekker resten.",
     "businessPersonalPitch": "Tre postkasser for $9 i måneden, nok til post@, salg@ og din egen.",
-    "businessProPitch": "Alle postkassene bedriften din bruker, på én agent, for $15 i måneden: økonomi, salg, support, post og din egen.",
+    "businessProPitch": "Opptil 10 av bedriftens postkasser på én agent, for $15 i måneden: økonomi, salg, support, post og din egen.",
     "recommendedBadge": "Anbefalt",
-    "upgradeTitle": "Pro kobler til alle postkassene du eier",
-    "upgradeBody": "Du var i ferd med å koble til enda en innboks. Pro fjerner grensen for $15 i måneden: jobb, privat og hvert sideprosjekt på samme agent.",
-    "featureInboxes": "Ubegrenset antall tilkoblede innbokser",
+    "upgradeTitle": "Pro kobler til opptil 10 postkasser",
+    "upgradeBody": "Du var i ferd med å koble til enda en innboks. Pro hever grensen til 10 for $15 i måneden: jobb, privat og hvert sideprosjekt på samme agent.",
+    "featureInboxes": "10 tilkoblede innbokser",
     "featureRateLimit": "5x høyere burst-grense",
     "featureTeam": "Si opp når som helst, behold resten av perioden",
-    "featureSupport": "E-poststøtte",
+    "featureSupport": "Prioritert e-poststøtte",
     "fastmailTabAppPassword": "App-passord",
     "howToGenerate": "Slik genererer du ett",
     "zohoRegionLabel": "Datasenterregion",
@@ -243,7 +272,7 @@
     "usernamePlaceholder": "La stå tomt for å bruke e-postadressen din",
     "usernameHint": "Trengs bare hvis leverandøren din bruker et eget brukernavn for innlogging i stedet for e-postadressen din. Sjekk e-postinnstillingene til leverandøren din (f.eks. «Brukernavn» eller «Kontonavn»).",
     "advancedToggle": "Avanserte innstillinger",
-    "advancedHint": "Sikkerhetsmodus og et eget brukernavn for innlogging. Standardverdiene virker for nesten alle postkasser.",
+    "advancedHint": "Tilkoblingstype, sikkerhetsmodus og et eget brukernavn for innlogging. Standardverdiene virker for nesten alle postkasser.",
     "imapSectionLabel": "IMAP (mottak av e-post)",
     "smtpSectionLabel": "SMTP (sending av e-post)",
     "hostPasteHint": "Du kan lime inn verten med port, for eksempel imap.example.com:993.",
@@ -256,6 +285,13 @@
     "hostPrefillAppPassword": "{provider} krever et app-passord, ikke det vanlige kontopassordet ditt.",
     "portMovedNote": "Flyttet port {port} til {protocol}-portfeltet.",
     "imapHostLabel": "IMAP-vert",
+    "connectionModeLabel": "Tilkoblingstype",
+    "connectionModeBoth": "Send og motta (IMAP + SMTP)",
+    "connectionModeImap": "Kun motta (IMAP)",
+    "connectionModeSmtp": "Kun sende (SMTP)",
+    "connectionModeBothHint": "Les, organiser og send e-post fra denne adressen.",
+    "connectionModeImapHint": "Les, søk i og organiser e-post. Sending fra denne adressen blir slått av.",
+    "connectionModeSmtpHint": "Send e-post fra denne adressen. Lesing og organisering av e-post blir slått av.",
     "imapPortLabel": "IMAP-port",
     "smtpHostLabel": "SMTP-vert",
     "smtpPortLabel": "SMTP-port",
@@ -322,7 +358,203 @@
     "outlookAdminLink": "Få godkjenningslenken til administratoren",
     "microsoftAddressNotice": "Dette er en Microsoft-konto. Microsoft-kontoer kobles til med Logg på med Microsoft; IMAP med passord fungerer ikke lenger for dem.",
     "microsoftAddressAction": "Bruk Logg på med Microsoft",
-    "errorMicrosoftAccountShort": "Microsoft godtar ikke lenger passord for denne kontoen. Koble den til med Outlook-kortet i stedet."
+    "errorMicrosoftAccountShort": "Microsoft godtar ikke lenger passord for denne kontoen. Koble den til med Outlook-kortet i stedet.",
+    "businessCapTitle": "Business kobler til mer enn 10 postkasser",
+    "businessCapBody": "Pro kobler til 10 postkasser. Business inkluderer 10 for $39 i måneden og legger til hver ekstra postkasse for $3 i måneden, med ubegrenset antall medlemmer uten ekstra kostnad.",
+    "businessCapCta": "Oppgrader til Business, $39/md",
+    "businessFeatureInboxes": "10 postkasser inkludert, $3 i måneden for hver ekstra",
+    "businessFeatureMembers": "Ubegrenset antall medlemmer med roller, uten ekstra kostnad",
+    "businessFeatureApprovals": "Administratorer godkjenner tilbakeholdte sendinger",
+    "businessFeatureWorkspaces": "Flere arbeidsområder på ett abonnement",
+    "fix": {
+      "heading": "Slik fikser du det",
+      "testAgain": "Test på nytt",
+      "useOutlook": "Bruk Microsoft-pålogging",
+      "receiveOnly": "Koble til bare for lesing",
+      "useSuggestedHost": "Bruk {host}",
+      "progressLogin": "Sjekker påloggingen...",
+      "progressSending": "Sjekker sending...",
+      "progressSlow": "Sjekker fortsatt. Noen e-postservere bruker opptil ett minutt på å svare.",
+      "gmail": {
+        "twoStep": "Slå på totrinnsbekreftelse for Google-kontoen din.",
+        "create": "Opprett et appassord på myaccount.google.com/apppasswords og kall det MCPEmails.",
+        "paste": "Lim inn de 16 bokstavene i passordfeltet. Mellomrom gjør ingenting.",
+        "workspace": "På en jobb- eller skolekonto kan valget for appassord mangle fordi administratoren har slått det av. Be i så fall administratoren om å tillate appassord.",
+        "imapDisabled": "Google Workspace-administratoren din har slått av IMAP for kontoen din, så ingen passord kan fungere.",
+        "imapDisabledAdmin": "Send dette til IT: Slå på IMAP-tilgang for kontoen min i Googles administrasjonskonsoll, under Apper, Google Workspace, Gmail, Tilgang for sluttbrukere."
+      },
+      "appPassword": {
+        "normalRejected": "Det vanlige {provider}-passordet ditt blir avvist her. Bare et appassord fungerer.",
+        "paste": "Lim det inn i passordfeltet og trykk Test på nytt."
+      },
+      "yahoo": {
+        "create": "På Yahoos side for kontosikkerhet, under Eksterne tilkoblinger, velger du Opprett appassord, kaller det MCPEmails og genererer det."
+      },
+      "aol": {
+        "create": "På AOLs side for kontosikkerhet genererer du et appassord og kaller det MCPEmails. Mangler valget, slår du først på totrinnsbekreftelse."
+      },
+      "icloud": {
+        "create": "På account.apple.com åpner du Pålogging og sikkerhet, deretter Appspesifikke passord, og oppretter ett som heter MCPEmails. Tofaktorautentisering må være på."
+      },
+      "ionos": {
+        "password": "IONOS vil ha passordet til denne e-postadressen, ikke det du bruker for å logge inn hos IONOS.",
+        "platform": "IONOS har egne e-postservere for USA og for Europa. Hvis IONOS-avtalen din er europeisk, bruk serveren for ditt land, for eksempel imap.ionos.de eller imap.ionos.co.uk, i stedet for imap.ionos.com."
+      },
+      "fullAddress": "Bruk hele e-postadressen din som brukernavn.",
+      "tOnline": {
+        "password": "Telekom godtar bare Passwort für E-Mail-Programme her, ikke Telekom Login-passordet ditt.",
+        "where": "Sett det i E-Mail Center under Einstellungen, deretter Passwörter, deretter Passwort für E-Mail-Programme."
+      },
+      "mailRu": {
+        "create": "I Mail.ru åpner du Innstillinger, Alle innstillinger, Sikkerhet, deretter Passord for eksterne programmer, og oppretter ett med full tilgang til e-posten."
+      },
+      "qq": {
+        "service": "I QQ Mail åpner du 设置 (Innstillinger), deretter 账号与安全 (Konto og sikkerhet), og slår på POP3/IMAP/SMTP-tjenesten.",
+        "code": "Generer en autorisasjonskode (授权码) og lim den inn i passordfeltet. QQ-passordet ditt fungerer ikke."
+      },
+      "mailCom": {
+        "imap": "Slå på IMAP hos mail.com: Email, Settings, POP3 and IMAP, og huk av for Enable access to this account via POP3 and IMAP. IMAP krever et mail.com Premium-abonnement.",
+        "twoFactor": "Med tofaktorautentisering på oppretter du et programspesifikt passord under Security Options og bruker det."
+      },
+      "infomaniak": {
+        "password": "Infomaniak godtar ikke Manager-passordet ditt her. I Manager åpner du Mail Service, adressen din, deretter Enheter, og legger til en enhet for å få et enhetspassord."
+      },
+      "orange": {
+        "imap": "Slå på POP/IMAP i Orange-innboksen: tannhjulet, tous les paramètres, Sécurité, Protocoles POP ou IMAP, deretter Activer POP/IMAP.",
+        "password": "Bruk deretter mot de passe dédié fra Espace client, under Connexion et sécurité."
+      },
+      "seznam": {
+        "password": "Hvis tofaktorautentisering (dvoufázové ověření) er på, slutter Seznam-passordet ditt å virke her. Sett et Heslo pro aplikace under Zabezpečení účtu og bruk det."
+      },
+      "aruba": {
+        "password": "Aruba sjekker passordet til denne postkassen, satt under Gestione caselle i Aruba-panelet, ikke innloggingen til Aruba-kundeområdet. På en Hosting Basic-plan fra før juni 2017 er IMAP et eget tillegg som må være aktivt på domenet."
+      },
+      "libero": {
+        "password": "Med Password Sicura på avviser Libero og Virgilio det vanlige passordet i e-postapper. Åpne Password per App i kontoområdet og bruk Password Specifica per Applicazioni på 16 tegn som vises der; det er ett passord for alle appene du kobler til."
+      },
+      "tim": {
+        "line": "TIM tillater e-postapper bare på en postkasse som er knyttet til en aktiv TIM-fastlinje eller -mobillinje. Uten det slipper TIM e-postapper inn kun fra sitt eget nett, og det er ikke MCPEmails."
+      },
+      "tiscali": {
+        "password": "Tiscali vil ha Tiscali Mail-passordet ditt sammen med hele adressen. Hjelpesidene beskriver tofaktorautentisering bare for innlogging i webmailen og sier ingenting om e-postapper, så er den på og innloggingen feiler, er det det første du bør sjekke."
+      },
+      "arubaPec": {
+        "password": "Med verifica in 2 passaggi på avviser Aruba PEC postkassepassordet i e-postapper. Generer en Password per programmi di posta under Gestione account PEC, deretter Sicurezza, og bruk den. Den utløper etter seks måneder."
+      },
+      "legalmail": {
+        "password": "Legalmail logger inn med User ID eller PEC-adressen og postkassens passord; en User ID skrives i feltet Brukernavn under Avanserte innstillinger. Bruker du heller et Application Password, oppretter du et 16-sifret under Password applicative i kontoinnstillingene; hvert av dem har sin egen utløpsdato, så sjekk at det ikke har gått ut."
+      },
+      "postecert": {
+        "password": "På PEC Postecertifica åpner du PEC-dashbordet, velger Genera password og bruker det klientpassordet; webmail-passordet godtas aldri, og klientpassordet utløper hver 90. dag."
+      },
+      "centrum": {
+        "password": "Med dvoufaktorové ověření på avviser Centrum, Atlas og Volný passordet ditt i e-postapper. Generer et aplikační heslo i seksjonen Dvoufaktorové ověření i webinnstillingene, på en datamaskin, og bruk det.",
+        "smtp": "Sending krever den gratis utvidede postkassen (navýšení schránky): bekreft et telefonnummer i webinnstillingene, og test så på nytt."
+      },
+      "wp": {
+        "imap": "Slå på IMAP i {provider}: Opcje, fanen IMAP/POP, deretter IMAP (pobieraj i wysyłaj wiadomości).",
+        "twoStep": "Med logowanie dwustopniowe på oppretter du et hasło do programu pocztowego under Bezpieczeństwo, Logowanie dwustopniowe, og bruker det i stedet for {provider}-passordet ditt."
+      },
+      "onet": {
+        "protocols": "Lås opp IMAP og SMTP i Onet Poczta: Ustawienia (tannhjulet), Konto, fanen Konto Główne, deretter bryteren på flisen til hver protokoll.",
+        "appPassword": "Med weryfikacja dwuetapowa på genererer du et hasło do aplikacji under Bezpieczeństwo i Onet Konto og bruker det i stedet for Onet-passordet ditt."
+      },
+      "interia": {
+        "program": "I Interia åpner du Ustawienia, Ustawienia główne, fanen Parametry, og setter korzystam z programu pocztowego til TAK.",
+        "twoStep": "Interia blokkerer e-postprogrammer så lenge logowanie dwuetapowe er på, og har ingen app-passord. Slå det av for å koble til."
+      },
+      "gmx": {
+        "imap": "{provider} slår av POP3- og IMAP-tilgang som standard. Slå det på under E-Mail-Einstellungen, deretter POP3/IMAP.",
+        "twoFactor": "Med tofaktorautentisering på bruker du et appassord i stedet for det vanlige passordet."
+      },
+      "zoho": {
+        "imap": "Slå på IMAP-tilgang i Zoho Mail under Innstillinger, E-postkontoer, IMAP-tilgang.",
+        "twoFactor": "Med tofaktorautentisering, føderert pålogging eller SAML genererer du et programspesifikt passord og bruker det."
+      },
+      "yandex": {
+        "create": "På id.yandex.com åpner du Sikkerhet, deretter Appassord, og oppretter ett av typen E-post.",
+        "imap": "I innstillingene for Yandex Mail åpner du E-postprogrammer og slår på både IMAP-tilgang og Appassord og OAuth-tokener."
+      },
+      "office365": {
+        "useOutlook": "Microsoft 365-innbokser fra jobb eller skole godtar ikke passord fra e-postapper. Koble den til med Microsoft-pålogging i stedet."
+      },
+      "smtp": {
+        "readingOk": "Serveren godtok påloggingen for å lese e-post, men avviste den for sending.",
+        "username": "Hvis leverandøren gir deg en egen pålogging for sending, skriver du den under Avanserte innstillinger, Brukernavn.",
+        "readOnly": "Eller koble til bare for lesing nå, og legg til sending senere i innstillingene for innboksen."
+      },
+      "unreachable": {
+        "tried": "Vi prøvde {host}, og serveren svarte ikke.",
+        "notFound": "Vi fant ingen e-postserver som heter {host}.",
+        "suggest": "Adressen din er hos {provider}, og serveren deres er {host}.",
+        "check": "Sjekk servernavnet på innstillingssiden til leverandøren din, og test på nytt.",
+        "blocked": "E-postserveren din godtar ikke tilkoblinger fra serverne våre. Det er vanlig for e-postservere i skoler og bedrifter.",
+        "blockedNext": "Be IT om å tillate tilgang utenfra, eller koble til en annen adresse."
+      },
+      "tls": {
+        "tried": "Vi prøvde port {tlsPort} med TLS og port {starttlsPort} med STARTTLS, og den sikre tilkoblingen feilet på begge.",
+        "next": "Hvis leverandøren oppgir en annen port eller sikkerhetsinnstilling, endrer du den her og tester på nytt."
+      },
+      "link": {
+        "twoStep": "Åpne totrinnsbekreftelse",
+        "appPasswords": "Åpne siden for appassord hos {provider}",
+        "imapSetting": "Slik slår du på IMAP hos {provider}",
+        "providerHelp": "Hjelpesiden til {provider}",
+        "adminGuide": "Googles veiledning for administratoren din",
+        "emailCenter": "Åpne E-Mail Center hos {provider}"
+      },
+      "outlookConsent": {
+        "line1": "Microsoft viser en samtykkeside med det MCPEmails får lov til: lese og endre e-post, sende e-post og holde seg tilkoblet.",
+        "line2": "Godta for å koble til. Microsoft-passordet skriver du bare inn på Microsofts side.",
+        "line3": "En jobbkonto kan be om godkjenning fra en administrator i stedet. Skjer det, kommer du tilbake hit og henter lenken til administratoren."
+      },
+      "outlookCancelled": {
+        "title": "Du avbrøt på Microsofts side",
+        "body": "Ingenting ble koblet til. For å koble til Outlook-innboksen godtar du samtykkesiden når Microsoft viser den.",
+        "tryAgain": "Prøv igjen"
+      },
+      "done": {
+        "title": "Innboksen er koblet til",
+        "body": "Koble nå til AI-appen din, så den kan bruke denne innboksen.",
+        "bodyClient": "Koble nå til {client}, så den kan bruke denne innboksen.",
+        "openGuide": "Vis meg hvordan",
+        "later": "Senere"
+      },
+      "mailbox": {
+        "password": "{provider} vil ha passordet til denne e-postadressen, ikke det du bruker for å logge inn på {provider}-kontoen din."
+      },
+      "uol": {
+        "imap": "UOL avviser e-postapper til IMAP er slått på. Åpne Configurações i UOL-webmailen og velg Ativar IMAP, og test på nytt."
+      },
+      "yahooJapan": {
+        "access": "Yahoo! JAPAN har ikke apppassord. I e-postinnstillingene hos Yahoo! JAPAN tillater du tilgang fra andre e-postapper og slår på både IMAP og SMTP.",
+        "password": "Bruk deretter det vanlige passordet til Yahoo! JAPAN ID-en din. Logger du inn uten passord (passnøkkel eller SMS), må du først lage et passord."
+      },
+      "docomo": {
+        "setting": "Åpne メール設定 i My docomo, deretter dアカウントの利用設定, og slå på dアカウントでドコモメールを利用する. Dette fungerer bare over mobilnettet, ikke Wi-Fi.",
+        "login": "Skriv deretter inn IMAP専用ID fra My docomo i Brukernavn (valgfritt) under Avanserte innstillinger, og IMAP専用パスワード som passord."
+      },
+      "nifty": {
+        "imap": "Sett メールソフト接続許可（IMAP） til 許可中 (tillatt) i e-postinnstillingene hos @nifty, og test på nytt."
+      },
+      "soNet": {
+        "option": "So-net-e-post fungerer i e-postapper over IMAP bare med betalingstillegget IMAP-tjeneste (IMAPサービス). Legg det til So-net-avtalen din først."
+      },
+      "plala": {
+        "imap": "Slå på IMAPを利用する (bruk IMAP) i plala Webmail først, og test på nytt."
+      },
+      "freenet": {
+        "imap": "freenet avviser e-postapper til POP3, IMAP og SMTP er aktivert i innstillingene for freenet Mail. Slå dem på, og test på nytt."
+      }
+    },
+    "businessCapBodyFounder": "Pro kobler til 10 postkasser. Business inkluderer 10, med ubegrenset antall medlemmer uten ekstra kostnad.",
+    "businessCapCtaFounder": "Oppgrader til Business, ${price}/md",
+    "businessCapBodySeat": "Pro kobler til 10 postkasser. På Business kobler hver person til opptil 10 egne postkasser, private for dem, og 10 felles postkasser for hele firmaet er inkludert, deretter $3 i måneden per stykk. Faktureres per person som kobler til en postkasse, minst 2 personer.",
+    "businessCapCtaSeat": "Oppgrader til Business",
+    "businessSeatFeaturePrivate": "Private postkasser for hver person, opptil 10 hver",
+    "businessSeatFeatureCompany": "10 felles postkasser for hele firmaet inkludert, $3 i måneden for hver ekstra",
+    "businessSeatFeatureRules": "Mottakerregler for utgående e-post",
+    "errorYahooJapanShort": "Yahoo! JAPAN-e-post er en annen tjeneste enn Yahoo Mail og har ikke apppassord. Gå tilbake og velg IMAP / SMTP i stedet."
   },
   "commandPalette": {
     "pageOverview": "Oversikt",
@@ -333,6 +565,7 @@
     "pageApprovals": "Godkjenninger",
     "pageSettings": "Innstillinger",
     "pageSecurity": "Sikkerhet",
+    "pageHelp": "Hjelp og kundestøtte",
     "groupTitlePage": "Side",
     "actionConnectInbox": "Koble til innboks",
     "groupTitleAction": "Handling",
@@ -374,7 +607,7 @@
   },
   "adminConsentLink": {
     "title": "Send denne lenken til IT-ansvarlig",
-    "body": "Send denne lenken til Microsoft 365-administratoren din. De logger på med administratorkontoen sin hos Microsoft og godkjenner én gang; de trenger ikke en MCP Emails-konto. Etter det kan alle i organisasjonen din koble til Outlook.",
+    "body": "Send denne lenken til Microsoft 365-administratoren din. De logger på med administratorkontoen sin hos Microsoft og godkjenner én gang; de trenger ikke en MCPEmails-konto. Etter det kan alle i organisasjonen din koble til Outlook.",
     "label": "Godkjenningslenke",
     "loading": "Lager lenke...",
     "copy": "Kopier",
@@ -387,20 +620,56 @@
   },
   "adminConsentResult": {
     "grantedTitle": "Godkjent",
-    "grantedBody": "Teamet ditt kan nå koble til Outlook i MCP Emails. Ingen trenger å godkjenne noe mer: hver person logger på med Microsoft når de kobler til sin egen postkasse.",
+    "grantedBody": "Teamet ditt kan nå koble til Outlook i MCPEmails. Ingen trenger å godkjenne noe mer: hver person logger på med Microsoft når de kobler til sin egen postkasse.",
     "cancelledTitle": "Ikke godkjent",
     "cancelledBody": "Godkjenningen ble avbrutt i Microsofts vindu, så ingenting er endret. Åpne lenken igjen når du er klar.",
     "failedTitle": "Godkjenningen gikk ikke gjennom",
     "failedBody": "Microsoft bekreftet ikke godkjenningen. Det krever en administratorkonto i Microsoft 365, for eksempel global administrator eller administrator for skyprogrammer. Logg på med en slik konto og åpne lenken igjen.",
     "link_invalidTitle": "Denne lenken er ikke gyldig",
-    "link_invalidBody": "Godkjenningslenken er ufullstendig eller har blitt endret. Be personen som sendte den om en ny fra MCP Emails-dashbordet sitt.",
+    "link_invalidBody": "Godkjenningslenken er ufullstendig eller har blitt endret. Be personen som sendte den om en ny fra MCPEmails-dashbordet sitt.",
     "link_expiredTitle": "Denne lenken har utløpt",
-    "link_expiredBody": "Godkjenningslenker virker i 7 dager. Be personen som sendte den om en ny fra MCP Emails-dashbordet sitt.",
+    "link_expiredBody": "Godkjenningslenker virker i 7 dager. Be personen som sendte den om en ny fra MCPEmails-dashbordet sitt.",
     "timed_outTitle": "Start på nytt",
     "timed_outBody": "Godkjenningen tok for lang tid eller ble fullført i en annen nettleser. Åpne godkjenningslenken igjen i denne nettleseren.",
     "unavailableTitle": "Noe gikk galt",
     "unavailableBody": "Vi kunne ikke starte godkjenningen. Prøv igjen om noen minutter.",
-    "closeHint": "Spørsmål? Skriv til hello@mcpemails.com.",
-    "openApp": "Åpne MCP Emails"
+    "closeHint": "Spørsmål? Skriv til support@mcpemails.com.",
+    "openApp": "Åpne MCPEmails"
+  },
+  "seasonal": {
+    "badge": "Black Week",
+    "line": "Black Week: ${firstYear} det første året, deretter ${renewal} i året. Du sparer ${saving}.",
+    "ends": "Slutter {date} kl. {time} norsk tid.",
+    "ctaAnnual": "Oppgrader til {plan} årlig",
+    "switchBody": "Black Week: bytt til årlig for ${firstYear} det første året, deretter ${renewal} i året. Ubrukte dager i inneværende måned trekkes fra, så du betaler litt mindre enn det i dag.",
+    "switchCta": "Bytt til årlig",
+    "switchBusy": "Klargjør...",
+    "ended": "Black Week-tilbudet er over, så ingenting ble belastet. Beløpene over er vanlig pris."
+  },
+  "annualSwitch": {
+    "title": "Bytt til årlig fakturering",
+    "body": "Betal for {plan} én gang i året og spar {percent} % sammenlignet med månedlig betaling.",
+    "current": "De ubrukte dagene i inneværende måned blir kreditert, så dagens belastning blir litt lavere enn et helt år. Du ser det nøyaktige beløpet før noe blir belastet.",
+    "cta": "Bytt til årlig",
+    "busy": "Forbereder...",
+    "noticeBody": "Du betaler for {plan} hver måned. Årlig fakturering koster {percent} % mindre.",
+    "noticeCta": "Se årlig fakturering",
+    "close": "Lukk"
+  },
+  "founder": {
+    "line": "Grunnleggerpris: ${price} i måneden, og den beholder du så lenge abonnementet løper. Gjelder de {total} første selskapene eller frem til 31. desember 2026, det som kommer først. Ekstra postkasser koster ${addon} i måneden hver.",
+    "places": "{left} av {total} plasser igjen",
+    "priceChanged": "Prisen endret seg før du bekreftet, så ingenting ble belastet. Beløpene over er prisen som gjelder nå."
+  },
+  "onboardingEntry": {
+    "finishSetup": "Fullfør oppsettet",
+    "resetTitle": "Tilbakestill oppstarten",
+    "resetBody": "Kun for interne kontoer. Nullstiller fremdriften i oppsettet og markørene for første kall i dette arbeidsområdet, slik at du kan gå gjennom oppsettet på nytt. Innbokser og nøkler forblir tilkoblet.",
+    "resetButton": "Tilbakestill oppstarten",
+    "resetFailed": "Kunne ikke tilbakestille oppstarten. Prøv igjen."
+  },
+  "help": {
+    "loading": "Laster hjelp…",
+    "loadError": "Kunne ikke laste hjelp. Last inn siden på nytt eller send e-post til support@mcpemails.com."
   }
 }

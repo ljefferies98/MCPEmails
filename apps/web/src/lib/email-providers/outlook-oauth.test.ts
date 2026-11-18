@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   OUTLOOK_SCOPES,
   shouldForceConsent,
+  outlookAuthorizePrompt,
   classifyMicrosoftAuthError,
   outlookTenant,
   outlookAuthorizeEndpoint,
@@ -33,6 +34,16 @@ test('reconnect forces the consent screen', () => {
   // Re-consent is the only way to pick up a widened scope set: a silent refresh
   // keeps whatever scopes were originally granted.
   assert.equal(shouldForceConsent(true), true);
+});
+
+test('first connect shows the Microsoft account picker', () => {
+  // Without a prompt, Microsoft reuses the account already signed in, so a
+  // person who picked the wrong account fails the same way on every retry.
+  assert.equal(outlookAuthorizePrompt(false), 'select_account');
+});
+
+test('reconnect still forces consent rather than the account picker', () => {
+  assert.equal(outlookAuthorizePrompt(true), 'consent');
 });
 
 // ─── scopes ───────────────────────────────────────────────────────────────────
@@ -352,7 +363,7 @@ test('an admin without a session lands on the public result page, not the dashbo
   );
 });
 
-test('an admin signed in to a DIFFERENT MCP Emails account still gets the public page', () => {
+test('an admin signed in to a DIFFERENT MCPEmails account still gets the public page', () => {
   const url = adminConsentCallbackRedirect({ appUrl: APP, outcome: 'admin_consent_granted', sessionUserId: WS, inviterUserId: USER });
   assert.ok(url.includes('/auth/outlook/admin-consent/result?status=granted'));
 });
@@ -378,7 +389,7 @@ test('every locale has the admin-link dialog, every result status and the Micros
   const webRoot = fileURLToPath(new URL('../../../', import.meta.url));
   const en = JSON.parse(readFileSync(`${webRoot}messages/en/dashboardChrome.json`, 'utf8'));
   const linkKeys = Object.keys(en.adminConsentLink);
-  for (const locale of ['en', 'es', 'fr', 'nb', 'zh']) {
+  for (const locale of ['en', 'es', 'fr', 'nb', 'zh', 'de']) {
     const m = JSON.parse(readFileSync(`${webRoot}messages/${locale}/dashboardChrome.json`, 'utf8'));
     for (const key of linkKeys) assert.ok(m.adminConsentLink?.[key], `${locale} adminConsentLink.${key}`);
     for (const status of ADMIN_CONSENT_RESULT_STATUSES) {

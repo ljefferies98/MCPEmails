@@ -44,6 +44,617 @@ export const KINDS = ['added', 'improved', 'fixed', 'changed'];
 export const ENTRIES = [
   /* ── October 2026 ──────────────────────────────────────────── */
   {
+    date: '2026-11-17',
+    kind: 'fixed',
+    title: 'Next step after your first inbox',
+    body:
+      'After you connect your first inbox, the dashboard now shows how to connect your AI app. Before, that step was sometimes replaced by an offer to add another inbox.',
+  },
+  {
+    date: '2026-11-16',
+    kind: 'added',
+    title: 'MCPEmails in the ChatGPT plugin directory',
+    body:
+      'MCPEmails is now in the ChatGPT plugin directory as Any Mailbox, so ChatGPT and Codex users can add it from Plugins without setting up a custom connector.',
+  },
+  {
+    date: '2026-11-14',
+    kind: 'added',
+    title: 'Choose how long held sends wait for approval',
+    body:
+      "On the Approvals page, an owner or admin can now give held sends 1, 3, 7 or 14 days to be approved, and each pending send shows when it expires.",
+  },
+  {
+    date: '2026-11-12',
+    kind: 'fixed',
+    title: 'Clear answer when your mail provider flags a message as spam',
+    body:
+      "When your mail provider refuses a message as spam, your AI is now told it was not sent and to reword it rather than send it again, and the sent card says so. Before, it could read the refusal as an unclear delivery and retry the same message.",
+  },
+  {
+    date: '2026-11-11',
+    kind: 'added',
+    title: 'Private and company-wide mailboxes for teams',
+    body:
+      "In a team workspace each person's mailboxes are now private to them and their AI, and an owner or admin can make a mailbox company-wide for everyone. Admins can export a per-person audit log as CSV and hold sends to recipients outside the company's domains for approval.",
+  },
+  {
+    date: '2026-11-11',
+    kind: 'added',
+    title: 'Setup guides for eight more web hosts, and five reviewed ISP guides',
+    body:
+      "New connect guides for mailboxes on your own domain at cyber_Folks, TransIP, Combell, Hostpoint, Websupport, REG.RU, 20i StackMail and Arsys, each checked against the host's own help pages. When you connect a mailbox from one of these hosts, MCPEmails fills in the server settings and points you at the host's own help page if the sign-in is refused. The Optimum, Rogers, SFR, StartMail and Spark Xtra guides are now published too, after a review against each provider's current help.",
+  },
+  {
+    date: '2026-11-11',
+    kind: 'fixed',
+    title: 'Accepting a workspace invite opens that workspace',
+    body:
+      "After accepting an invite you now land in the workspace you were invited to, so the mailboxes you connect go there. Before, someone new to MCPEmails could land in their own new workspace instead and connect their mailbox there.",
+  },
+  {
+    date: '2026-11-10',
+    kind: 'added',
+    title: 'Setup guides for Italian, Czech and Polish mail providers',
+    body:
+      "New connect guides for Aruba, Aruba PEC, Legalmail and Poste PEC, Libero and Virgilio, TIM, Tiscali, Centrum, Atlas and Volný, and Gazeta.pl, with updated Onet, WP and Interia guides. When you connect a mailbox from one of these providers, MCPEmails now fills in the server settings and shows the provider's own steps if the sign-in is refused.",
+  },
+  {
+    date: '2026-11-10',
+    kind: 'added',
+    title: 'More guides and articles in German, Brazilian Portuguese and Japanese',
+    body:
+      "New German connect guides for Proton, Infomaniak, mail.com, AOL, Hostinger, GoDaddy, Titan, mailcow, Plesk and Open-Xchange, and the GMX, WEB.DE, T-Online, iCloud, STRATO and IONOS guides are rewritten with a troubleshooting section. Brazilian Portuguese and Japanese get guides for cPanel, Plesk, Zimbra, Synology and other mail servers and hosting panels, and eleven more blog articles are available in each of the three languages.",
+  },
+  {
+    date: '2026-11-10',
+    kind: 'fixed',
+    title: 'German, Portuguese and Japanese pages fully in their language',
+    body:
+      "The connect page categories, blog tags, author line and sign-in tab title showed English on the German, Brazilian Portuguese and Japanese versions of the site. They now appear in the language of the page, and the ChatGPT setup steps in those languages use the menu labels ChatGPT itself shows.",
+  },
+  {
+    date: '2026-11-09',
+    kind: 'fixed',
+    title: 'Clearer message when a mail server refuses a password',
+    body:
+      "When an IMAP or Fastmail server refuses an inbox's password, your AI assistant now says so. Before, it said an OAuth token had expired, even for mailboxes that sign in with a password.",
+  },
+  {
+    date: '2026-11-07',
+    kind: 'improved',
+    title: 'See which account you are signed in to',
+    body:
+      "Signing in with Google now asks which Google account to use, and the dashboard shows your email under your name. Before, two accounts with the same name looked identical.",
+  },
+  {
+    date: '2026-11-07',
+    kind: 'fixed',
+    title: 'T-Online inboxes connect',
+    body:
+      "T-Online and Telekom mailboxes now connect over IMAP. Before, every attempt ended with a message saying the password was rejected, even when the password for email programs was correct.",
+  },
+  {
+    date: '2026-11-05',
+    kind: 'fixed',
+    title: 'Choose your Microsoft account when connecting Outlook',
+    body:
+      "Connecting Outlook now asks which Microsoft account to use. Before, a retry signed you straight back in with the account you picked last time, so choosing the wrong one first left you stuck.",
+  },
+  {
+    date: '2026-11-05',
+    kind: 'fixed',
+    title: 'Search and inbox listing on more IMAP servers',
+    body:
+      "Searching or listing an IMAP inbox could fail partway, or take far longer than usual, when the mail server sent whole messages where only a short preview was asked for. Those inboxes now list and search at their usual speed.",
+  },
+  {
+    date: '2026-11-04',
+    kind: 'added',
+    title: 'Setup guides for Yahoo! JAPAN, Locaweb, Vodafone and more',
+    body:
+      "New step-by-step connect guides for Yahoo! JAPAN, OCN, BIGLOBE and @nifty in Japanese, Locaweb and KingHost in Brazilian Portuguese, and Vodafone and A1 in German. The HostGator guide now covers HostGator Brasil.",
+  },
+  {
+    date: '2026-11-04',
+    kind: 'improved',
+    title: 'Server settings fill in for more mailbox providers',
+    body:
+      "When you connect a mailbox from Locaweb, KingHost, UOL, BOL, Terra, Yahoo! JAPAN, docomo, OCN, BIGLOBE, @nifty, STRATO, freenet, Vodafone, A1, Bluewin and other providers in Brazil, Japan, Germany, Austria and Switzerland, MCPEmails now fills in the server settings and shows the provider's own steps if the sign-in is refused.",
+  },
+  {
+    date: '2026-11-04',
+    kind: 'added',
+    title: 'MCPEmails in Brazilian Portuguese and Japanese',
+    body:
+      "The website, dashboard, setup guides for every AI client and the pages for mailbox providers such as UOL, BOL and Terra are now in Brazilian Portuguese at /pt and in Japanese at /ja.",
+  },
+  {
+    date: '2026-11-02',
+    kind: 'fixed',
+    title: 'Send and Delete work in the ChatGPT draft card',
+    body:
+      "The Send and Delete draft buttons in the draft card now work in ChatGPT. Before, the card said the connection had dropped and the draft stayed in Drafts.",
+  },
+  {
+    date: '2026-11-01',
+    kind: 'fixed',
+    title: 'Searching all inboxes works with one inbox',
+    body:
+      "When your AI app asks to list or search all inboxes and you have one connected, it now reads that inbox. Before, the request came back with a plan notice and the app had to ask again.",
+  },
+  {
+    date: '2026-10-31',
+    kind: 'fixed',
+    title: 'Replies follow the Reply-To address',
+    body:
+      "Replies and reply drafts now go to a message's Reply-To address when it has one, on every provider. Before, a reply to a contact form or help desk message could be addressed to the From address, which was often your own mailbox.",
+  },
+  {
+    date: '2026-10-30',
+    kind: 'fixed',
+    title: 'Inboxes page shows when a password was refused',
+    body:
+      "When your mail server refuses an inbox's password, the Inboxes page now marks it Needs reconnect with a Reconnect button, where before it could still read Connected. The support form lists each mailbox by its address and says whether it is connected.",
+  },
+  {
+    date: '2026-10-30',
+    kind: 'added',
+    title: 'Help articles and support in the dashboard',
+    body:
+      "You can now search help articles and write to support from Help & support in the dashboard and at mcpemails.com/help. When an inbox fails to connect, the error offers a Contact support link that opens the form with the provider and error already filled in.",
+  },
+  {
+    date: '2026-10-30',
+    kind: 'improved',
+    title: 'Account deletion confirmation and Google access',
+    body:
+      "Deleting your account now sends a confirmation email that lists what was removed and the date the remaining records are erased, and ends MCPEmails' access to your Gmail inboxes in your Google account, as disconnecting a single inbox already did. Disconnecting an inbox also cancels the scheduled emails still queued for it.",
+  },
+  {
+    date: '2026-10-29',
+    kind: 'added',
+    title: 'One-click install on the client setup guides',
+    body:
+      "The setup guides for Claude, Claude Cowork, Cursor and VS Code now open the app with MCPEmails already filled in, and the Claude Code, Codex and Gemini CLI guides have the install command ready to copy.",
+  },
+  {
+    date: '2026-10-28',
+    kind: 'fixed',
+    title: 'Home page examples in your language',
+    body:
+      "The example prompts and the dashboard preview on the home page showed English text on the German, French, Spanish, Norwegian and Chinese versions of the site. They now appear in the language of the page.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'fixed',
+    title: 'Folder searches explain a busy mail server',
+    body:
+      "When a search across named folders hit a mail server that was limiting connections, such as Yahoo, your AI app got a generic internal error. It now gets an error that says what the mail provider refused, so it can tell you or try again later.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'improved',
+    title: 'Signing up from Claude or ChatGPT says where you came from',
+    body:
+      "When you connect MCPEmails from Claude or ChatGPT and create your account on the way, the sign-up page now names the app you are connecting and keeps you in that flow. The dashboard's recent activity also shows all inboxes for calls that cover every inbox, instead of an unknown inbox.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'added',
+    title: 'Undo a bulk move or delete from the chat',
+    body:
+      "After your AI moves or deletes a batch of emails, Claude now shows a card with what changed, a few of the messages, and an Undo button that puts them back where they were. Undo works for 24 hours on mailboxes connected with IMAP.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'improved',
+    title: 'Review settings show their card in the chat right away',
+    body:
+      "Turning on approvals, bulk review or the draft card now shows the card in a chat that is already open, without reconnecting MCPEmails in your AI app.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'added',
+    title: 'Have your AI ask before it sends',
+    body:
+      "A new review setting for each mailbox, Ask in the chat first, makes your AI show you the email in the conversation and wait for your yes before it sends. Open a mailbox on the Inboxes page and pick it under Review before sending.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'improved',
+    title: 'See what your AI sent, right in the chat',
+    body:
+      "After your AI sends, replies to or forwards an email, Claude and ChatGPT now show a receipt with the sending address, recipients, subject, the start of the message and its attachments, and whether a copy is in your Sent folder. When an email could not be sent, the card says so in one sentence, with the reason.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'added',
+    title: 'See an automation rule before you turn it on',
+    body:
+      "When your AI creates, changes or previews an automation rule in Claude, a card now shows the rule in one plain sentence, the messages it would act on right now, and an On/Off switch. If a rule matches nothing yet, the card says so.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'added',
+    title: 'Edit drafts right in the chat',
+    body:
+      "Drafts your AI writes now open in an editable card in Claude and ChatGPT, where you can change the recipients, subject and text, save, or send with a few seconds to undo. You can turn the card off for one mailbox or for the whole workspace in your dashboard.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'improved',
+    title: 'Approving an email your AI prepared is quicker',
+    body:
+      "The approval page now shows the email the way your mail client would, with the technical details folded away, and the email goes out the moment you approve it instead of up to a minute later. Signing in from an approval link now says why you are being asked to.",
+  },
+  {
+    date: '2026-10-27',
+    kind: 'fixed',
+    title: 'The approval card shows up even when you turn approvals on mid-chat',
+    body:
+      "When a send waits for your approval, Claude and ChatGPT now show the review card in any chat, including one that started before you turned approvals on. Ordinary sends and scheduled sends show a one-line confirmation. Before, those chats only got a text link.",
+  },
+  {
+    date: '2026-10-26',
+    kind: 'fixed',
+    title: 'Your AI only offers mailboxes that work',
+    body:
+      "When your AI asks which mailbox to use, a mailbox that needs reconnecting is now marked as such, with its reconnect link, instead of being offered as a choice. Before, picking one led to a failed draft or send.",
+  },
+  {
+    date: '2026-10-26',
+    kind: 'improved',
+    title: 'Smoother start when you add MCPEmails from Claude or ChatGPT',
+    body:
+      'Adding MCPEmails from your AI app now opens account creation, with Google first, and Claude starts with read, draft and send access so your first draft needs no second approval. If no mailbox is connected yet, the AI names your likely provider and gives you a link that opens straight on connecting it, then sends you back to the chat.',
+  },
+  {
+    // Date must be the day this lands on main.
+    date: '2026-10-26',
+    kind: 'fixed',
+    title: 'Current setup steps for ChatGPT, Claude and other AI apps',
+    body:
+      'The setup guides now follow the menus Claude and ChatGPT show today: Customize, Connectors in Claude, and Plugins, Add custom MCP server in ChatGPT, which no longer needs developer mode and works on the Go plan too. Before, they pointed to menus that had moved. The Devin Desktop (formerly Windsurf), Gemini CLI and VS Code steps are current as well.',
+  },
+  {
+    date: '2026-10-26',
+    kind: 'fixed',
+    title: 'Sent drafts leave Drafts, and Gmail keeps one Sent copy',
+    body:
+      "A Gmail account connected with an app password now gets one copy of each sent message in Sent, and a draft sent from it is removed from Drafts. Before, Sent held two copies and a sent draft could stay in Drafts. A sent draft is now also dated when it is sent rather than when it was written.",
+  },
+  {
+    date: '2026-10-26',
+    kind: 'improved',
+    title: 'One-click setup for Claude, Cursor and VS Code',
+    body:
+      'The setup guide in your dashboard now has an Add to Claude, Add to Cursor or Install in VS Code button that opens the app with MCPEmails already filled in. Gemini CLI gets a single command to copy.',
+  },
+  {
+    date: '2026-10-26',
+    kind: 'improved',
+    title: 'Server settings filled in for more custom domains',
+    body:
+      'When you connect a mailbox on your own domain hosted at Strato, one.com or Rackspace, the IMAP and SMTP servers are now filled in for you. Before, those fields stayed empty for these hosts.',
+  },
+  {
+    date: '2026-10-25',
+    kind: 'improved',
+    title: 'Automations can file mail into Junk or Spam',
+    body:
+      'An automation can now move the mail it matches into your Junk or Spam folder. Before, a rule whose destination was named Junk or Spam was refused when you saved it.',
+  },
+  {
+    date: '2026-10-24',
+    kind: 'added',
+    title: 'Follow-ups, snooze and a morning brief that work while the chat is closed',
+    body:
+      'Your AI app can now ask MCPEmails to remind you when nobody replies to mail you sent, and to snooze a message out of your inbox until a time you choose. A daily morning brief with new mail, VIP senders, follow-ups that are due and snoozed mail coming back is placed straight in your inbox at the hour you set, under Settings. All of it runs on our servers, so nothing waits for a chat to be open.',
+  },
+  {
+    date: '2026-10-24',
+    kind: 'added',
+    title: 'Search every inbox at once, and give your AI instructions per inbox',
+    body:
+      'Your AI app can now search or list all your connected inboxes in one call instead of one inbox at a time. You can also write standing instructions for each inbox, such as how to sign or which mail never to answer, under Advanced in the inbox settings, and every AI app you connect sees them when it lists your inboxes and when it drafts or sends.',
+  },
+  {
+    // Date must be the day this lands on main.
+    date: '2026-10-24',
+    kind: 'added',
+    title: 'Webhooks for new mail',
+    body:
+      'Add a webhook under API keys in the dashboard and MCPEmails sends a signed POST to your URL when new mail arrives in an inbox, with message IDs your agent can open with email_read. Each webhook has a test button and a delivery log.',
+  },
+  {
+    date: '2026-10-24',
+    kind: 'improved',
+    title: 'Ready-made first prompts once your inbox is connected',
+    body:
+      'After you connect an inbox, the dashboard overview now suggests three things to ask your AI app, each with a copy button, and reminds you how to switch MCPEmails on inside a Claude or ChatGPT chat. The step turns to "It works" by itself when your app makes its first call.',
+  },
+  {
+    date: '2026-10-24',
+    kind: 'improved',
+    title: 'A failed inbox connection tells you exactly what to do',
+    body:
+      'When an inbox does not connect, the form now shows the steps for your provider, such as creating a Yahoo, AOL, Gmail or iCloud app password or turning on IMAP, with a link to the right settings page and a Test again button that keeps what you typed. After your first inbox connects, it takes you straight to connecting your AI app.',
+  },
+  {
+    date: '2026-10-24',
+    kind: 'added',
+    title: 'A first week checklist on your dashboard',
+    body:
+      'For two weeks after you subscribe, the dashboard Overview shows a short checklist with starter prompts you can copy, and ticks each step off as your assistant uses MCPEmails. If your inbox keeps failing, it takes you straight to Reconnect.',
+  },
+  {
+    date: '2026-10-24',
+    kind: 'fixed',
+    title: 'Searching one folder searches that folder',
+    body:
+      'When your AI app searches a single named folder, the search now looks in that folder only. Before, a search that named the folder this way looked in the inbox instead.',
+  },
+  {
+    date: '2026-10-24',
+    kind: 'improved',
+    title: 'Pick the date your cancellation takes effect',
+    body:
+      'On the cancel contracts page you can now choose the date your cancellation takes effect and send it with one button. The footer link "Withdraw from contract here" opens the same form with withdrawal selected.',
+  },
+  {
+    date: '2026-10-23',
+    kind: 'improved',
+    title: 'mcpemails.com opens your dashboard when you are signed in',
+    body:
+      'Opening mcpemails.com while signed in now takes you straight to your dashboard. Click the logo in the dashboard to visit the homepage.',
+  },
+  {
+    date: '2026-10-21',
+    kind: 'added',
+    title: 'Change an inbox\'s connection type from its settings',
+    body:
+      'You can now switch an IMAP inbox between send and receive, receive only and send only from the inbox\'s Advanced settings, without entering your password again. The inbox keeps its ID and the AI apps already connected to it.',
+  },
+  {
+    date: '2026-10-21',
+    kind: 'added',
+    title: 'Choose the folders MCPEmails uses',
+    body:
+      'For IMAP inboxes you can now pick which folder MCPEmails uses for Sent, Drafts, Trash, Spam and Archive, under Advanced in the inbox\'s settings. Automatic detection stays the default.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'fixed',
+    title: 'Drafts to international addresses send again',
+    body:
+      'On IMAP inboxes, a draft written in another mail app to an address with a non-Latin domain such as münchen.de or пример.рф, or with a quoted name before the @, now sends. Before, sending it stopped with an invalid recipient error.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'added',
+    title: 'Free IMAP and SMTP settings lookup',
+    body:
+      'Type an email address or domain at mcpemails.com/tools/email-settings-lookup to see its incoming and outgoing server, port and security setting. For a company domain it reads the MX records to show which provider runs the mailbox.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'fixed',
+    title: 'Approved scheduled sends go out on time',
+    body:
+      'On an inbox that holds sends for approval, a scheduled email you approve now goes out at the time it was scheduled for. Before, the approved message could end in an error at that time instead of being sent.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'fixed',
+    title: 'Sent, Trash and Spam in your language',
+    body:
+      'On mail servers whose folders use localized names, such as "Éléments envoyés", "Gesendete Objekte" or "Отправленные", Sent copies are now saved and Trash, Spam, Drafts and Archive are recognised. Before, a copy of mail sent from these mailboxes was not saved to Sent.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'added',
+    title: 'MCPEmails in German',
+    body:
+      'The website, sign-up, dashboard, setup guides for every AI client and the pages for German, Austrian and Swiss mailbox providers such as GMX, WEB.DE and T-Online are now in German. Checkout opens in German for German visitors too.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'improved',
+    title: 'Tool calls start sooner',
+    body:
+      'The account and usage checks that run before every tool call now take one trip to the database instead of up to four, so a typical call starts about 0.4 seconds sooner. Connecting and listing tools got the same treatment.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'improved',
+    title: 'Smaller tool results',
+    body:
+      'Tool results and tool descriptions are sent more compactly, so they take up less of your assistant\'s context. The information in them is the same.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'improved',
+    title: 'Automations keep to their schedule at busy times',
+    body:
+      'Recurring automations are now picked up by several workers at once, so rules run close to their scheduled time even when many are due together.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'changed',
+    title: 'MCPEmails is run by Albretsen AS',
+    body:
+      'From 1 November 2026 the service is provided by Albretsen AS (org. no. 938 702 373), a Norwegian limited company owned by the same founder at the same address. The terms, privacy policy and email footers name the new company.',
+  },
+  {
+    date: '2026-10-19',
+    kind: 'fixed',
+    title: 'Archiving a Gmail conversation opened from Sent',
+    body:
+      'On Gmail connected over IMAP, archiving or moving a conversation you reached from Sent or another folder now takes it out of the Inbox. Before, those messages could stay in the Inbox.',
+  },
+  {
+    date: '2026-10-19',
+    kind: 'fixed',
+    title: 'Previews for newsletters that open with styling',
+    body:
+      'HTML emails that start with a long block of styling used to show an empty preview in lists and search results on IMAP inboxes. They now show the first lines of the message.',
+  },
+  {
+    date: '2026-10-19',
+    kind: 'improved',
+    title: 'Reply drafts keep their quote and a single signature',
+    body:
+      'Updating a reply draft keeps the quoted original message when the new text leaves it out, without doubling it when the assistant includes it, and a draft that already ends with your signature is no longer signed twice.',
+  },
+  {
+    date: '2026-10-16',
+    kind: 'improved',
+    title: 'Read-only keys are enforced by your mail server too',
+    body:
+      'A read-only key now opens IMAP folders in the mail server\'s own read-only mode, so the server itself refuses any change to flags, folders or messages. The read-only access page in the docs explains what each key can do.',
+  },
+  {
+    date: '2026-10-16',
+    kind: 'improved',
+    title: 'Security hardening across the workspace',
+    body:
+      'Viewers stay read-only everywhere, leaving a workspace revokes its connected apps, approvers see the Bcc list and full draft they are approving, and the sign-in consent screen shows where it will send you and labels unverified apps.',
+  },
+  {
+    date: '2026-10-15',
+    kind: 'improved',
+    title: 'Faster IMAP searches across several folders',
+    body:
+      'Searching many folders at once on an IMAP inbox is quicker, and a search that runs out of time now returns the folders it finished with a note naming the ones it skipped.',
+  },
+  {
+    date: '2026-10-15',
+    kind: 'improved',
+    title: 'Clearer guidance when a tool call is refused',
+    body:
+      'When an assistant sends an argument a tool does not take, the error now names the tool or field to use instead, so it can correct itself on the next call.',
+  },
+  {
+    date: '2026-10-15',
+    kind: 'fixed',
+    title: 'Large attachments up to 10 MB',
+    body:
+      'Files between about 3 MB and the 10 MB limit can now be attached to drafts and sent emails. A file over the limit gets a clear message.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'fixed',
+    title: 'IONOS mailboxes outside the US get their own server settings',
+    body:
+      'Adding an address on your own domain hosted by IONOS in Germany or the UK filled in the US server imap.ionos.com, and France, Spain and Italy got no settings at all. The connect form now fills in the server for your region, such as imap.ionos.de, and the IONOS setup page lists each region\'s server names.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'fixed',
+    title: 'Language menu always opens a real page',
+    body:
+      'On a page that is not available in every language, the language menu in the footer used to lead to a missing page. It now opens that language\'s home page instead.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'improved',
+    title: 'Sign up in the language you were reading',
+    body:
+      'Signing up or signing in from a French, Spanish, Norwegian or Chinese page now opens the form and your dashboard in that language, including after signing in with Google or GitHub. You can still change the language in Settings.',
+  },
+  {
+    date: '2026-10-18',
+    kind: 'added',
+    title: 'Send As for IMAP inboxes',
+    body:
+      'iCloud, Yahoo and other IMAP inboxes can now send from another address that delivers to the same mailbox, such as an iCloud alias. Add it in the inbox settings and enter the code we email to it, then your assistant can use it as the From address.',
+  },
+  {
+    date: '2026-10-15',
+    kind: 'added',
+    title: 'Attachments on drafts',
+    body:
+      'Drafts can now carry files: new ones you give your assistant (including files shared in ChatGPT), or attachments copied from an email already in the inbox. Editing a draft keeps the files it already has, where an edit on Gmail or IMAP used to drop them.',
+  },
+  {
+    date: '2026-10-15',
+    kind: 'fixed',
+    title: 'Mail hosts that turn away cloud servers now connect',
+    body:
+      'A few mail providers refuse connections from cloud servers, so connecting or sending from them timed out or was refused even with the right password. MCPEmails now retries those connections through a separate route and remembers which providers need it.',
+  },
+  {
+    date: '2026-10-15',
+    kind: 'fixed',
+    title: 'Self-hosted servers find their inboxes',
+    body:
+      'A self-hosted install answered "No inbox matches" on every tool except inbox_list, and could not read stored IMAP credentials. The bundled database schema is back in step with the server, and existing installs upgrade in place with make migrate, keeping their inboxes and keys.',
+  },
+  {
+    date: '2026-10-13',
+    kind: 'added',
+    title: 'Signature images embedded in the message',
+    body:
+      'A new option in the signature editor embeds your signature\'s images in each message, so logos show in Thunderbird, Outlook and other clients that block remote images. Works on Gmail and IMAP inboxes; it is off unless you turn it on.',
+  },
+  {
+    date: '2026-10-13',
+    kind: 'fixed',
+    title: 'Inline cards in Claude keep working after an update',
+    body:
+      'After we shipped a new version, Claude could show "can\'t reach MCPEmails" where a card belonged until the connector was refreshed. Cards now load from the current version whatever Claude has cached.',
+  },
+  {
+    date: '2026-10-13',
+    kind: 'fixed',
+    title: 'Clearer error for a mistaken mail server',
+    body:
+      'Browser autofill no longer fills the IMAP or SMTP server fields, and entering mcpemails.com as a mail server now says so directly instead of reporting that your provider never answered.',
+  },
+  {
+    date: '2026-10-13',
+    kind: 'added',
+    title: 'Receive-only and send-only inboxes',
+    body:
+      'A mailbox with only an IMAP server or only an SMTP server can now connect: pick the connection type under Advanced settings in the IMAP/SMTP form. A tool that needs the other half says what still works on that inbox.',
+  },
+  {
+    date: '2026-10-13',
+    kind: 'changed',
+    title: 'ChatGPT and Codex list one tool per operation',
+    body:
+      'OpenAI clients now see a separate tool for each operation, such as creating a draft or renaming a folder, each with its own safety annotations. Every other client keeps the same tool list as before.',
+  },
+  {
+    date: '2026-10-12',
+    kind: 'improved',
+    title: 'Orange mailboxes connect',
+    body:
+      'orange.fr inboxes now sign in for both reading and sending, with nothing extra to set up.',
+  },
+  {
+    date: '2026-10-09',
+    kind: 'improved',
+    title: '163.com and 126.com mailboxes can read mail',
+    body:
+      'Listing, searching and reading now work on NetEase mailboxes (163.com, 126.com, yeah.net, 188.com) and other Coremail servers.',
+  },
+  {
+    date: '2026-10-09',
+    kind: 'improved',
+    title: 'Room for long sessions in ChatGPT and Notion',
+    body:
+      'Clients that reconnect around every tool call can now run long, busy sessions without being slowed down by connection checks.',
+  },
+  {
+    date: '2026-10-08',
+    kind: 'fixed',
+    title: 'Sent copies land in the real Sent folder on IMAP',
+    body:
+      'Mail sent from an IMAP inbox is now filed in the folder the server marks as Sent, including Chinese-named folders such as QQ Mail\'s 已发送, which also now resolve as sent, drafts, trash and spam. If no Sent folder accepts the copy, the result says so instead of silently leaving Sent empty.',
+  },
+  {
     date: '2026-10-03',
     kind: 'improved',
     title: 'Faster mailbox reads on IMAP accounts',
@@ -413,7 +1024,7 @@ export const ENTRIES = [
   {
     date: '2026-08-29',
     kind: 'added',
-    title: 'Who is behind MCP Emails',
+    title: 'Who is behind MCPEmails',
     body:
       'A new About page, and the legal entity, organisation number and registered address in the Terms and Privacy pages.',
   },
@@ -682,7 +1293,7 @@ export const ENTRIES = [
   {
     date: '2026-05-26',
     kind: 'added',
-    title: 'MCP Emails is live',
+    title: 'MCPEmails is live',
     body:
       'Connect a mailbox and work it from an AI assistant: list, read, search, send and reply. Gmail and Fastmail to start, with Claude connecting over OAuth and other clients using an API key.',
   },

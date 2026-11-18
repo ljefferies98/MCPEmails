@@ -42,7 +42,7 @@ import { isAdvertisedTool } from "./advertised-schema.ts";
 // tool-surface.test.ts, and for the same reason.
 Deno.env.set("MCP_INTROSPECTION_ONLY", "1");
 Deno.env.set("MCP_SERVER_NO_LISTEN", "1");
-const { SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_MAX_BYTES, TOOL_REGISTRY } = await import(
+const { PER_OPERATION_SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_MAX_BYTES, TOOL_REGISTRY } = await import(
   "./index.ts"
 );
 
@@ -173,5 +173,52 @@ Deno.test("the inbox-selection rule sits in the head of the string", () => {
     head.includes("inbox_id"),
     "the inbox-selection rule must stay in the first 1KB, where a truncating client " +
       "still sees it.",
+  );
+});
+
+Deno.test("the APP-ONLY paragraph names each card family for what it is, and draft_read is a read", () => {
+  // 2026-10-13. It read "the `approval_*` and `bulk_*` tools render the in-chat
+  // review card for a held send": wrong about `bulk_*` (a bulk plan, not a
+  // send) and silent about the draft editor's card-only tool.
+  //
+  // `draft_editor_hide` is NOT in it. The card tells a person the card "can be
+  // brought back by asking in this chat", and the model calling that tool is
+  // how; an instruction that said "the host drives it, not you" contradicted
+  // the card and the tool's own description.
+  const appOnly = SERVER_INSTRUCTIONS.split("\n\n").find((p: string) => p.startsWith("APP-ONLY:"));
+  assertEquals(
+    appOnly,
+    "APP-ONLY: `approval_*` (a held send), `bulk_*` (a bulk plan) and " +
+      "`draft_editor_save` back the in-chat cards. The host calls them.",
+  );
+  assert(!SERVER_INSTRUCTIONS.includes("draft_editor_hide"), "hide is the model's to call");
+  // `draft_read` is NOT app-only: the model calls it. It belongs with the reads.
+  assert(!appOnly!.includes("draft_read"));
+  const pairs = SERVER_INSTRUCTIONS.split("\n\n").find((p: string) =>
+    p.startsWith("READ/WRITE PAIRS:")
+  );
+  assert(pairs!.includes("`draft_read` reads one draft in full."), pairs);
+  assert(!SERVER_INSTRUCTIONS.includes("\u2014"), "no em dash");
+});
+
+Deno.test("the DRAFTS paragraph states that a saved draft is one the user can see and edit", () => {
+  // 2026-10-25: asked to write an email, models wrote it in the chat and never
+  // called a draft tool, so the draft editor card never appeared. Worded
+  // without a tool name so it holds on both listings and on hosts with no card.
+  const drafts = SERVER_INSTRUCTIONS.split("\n\n").find((p: string) => p.startsWith("DRAFTS:"));
+  assertEquals(
+    drafts,
+    "DRAFTS: an email saved with `draft` is one the user can see and edit; chat text alone is not saved.",
+  );
+});
+
+Deno.test("OpenAI clients get the DRAFTS paragraph as a statement, not an instruction", () => {
+  // chatgpt.com 2026-10-27 put a "Suspicious Instruction" box over imperative
+  // steering about drafts on every draft_create call.
+  const drafts = PER_OPERATION_SERVER_INSTRUCTIONS.split("\n\n").find((p: string) => p.startsWith("DRAFTS:"));
+  assertEquals(
+    drafts,
+    "DRAFTS: an email saved with `draft_create` or `draft_reply` is one the " +
+      "user can see and edit; text written only in chat is not saved.",
   );
 });

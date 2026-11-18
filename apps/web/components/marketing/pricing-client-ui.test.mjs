@@ -87,11 +87,11 @@ const PLAN_KEYS = ['free', 'personal', 'solo', 'pro'];
 const checkout = (plan, interval) => `/api/stripe/checkout/start?plan=${plan}&interval=${interval}`;
 const viaSignup = (plan, interval) => `/signup?redirect=${encodeURIComponent(checkout(plan, interval))}`;
 
-function tree() {
-  return createElement(NextIntlClientProvider, { locale: 'en', messages }, createElement(PricingClient, { stripePrices: undefined }));
+function tree(locale = 'en') {
+  return createElement(NextIntlClientProvider, { locale, messages }, createElement(PricingClient, { stripePrices: undefined }));
 }
 
-async function renderPricing(t, { user = null, gate = null } = {}) {
+async function renderPricing(t, { user = null, gate = null, locale = 'en' } = {}) {
   session = { user };
   calls = [];
   listeners = [];
@@ -103,7 +103,7 @@ async function renderPricing(t, { user = null, gate = null } = {}) {
     beacons.push({ url: String(url), body: init.body ? JSON.parse(init.body) : null });
     return { ok: true, status: 204, json: async () => ({}) };
   };
-  const view = await mount(tree());
+  const view = await mount(tree(locale));
   let unmounted = false;
   const unmount = async () => { if (!unmounted) { unmounted = true; await view.unmount(); } };
   t.after(async () => {
@@ -233,6 +233,18 @@ test('logged out: the plan cards show four plans in ladder order, the featured o
   ]);
 });
 
+test('every paid card says charged today, cancel any time, 14-day refund under its button; Free does not', async (t) => {
+  const view = await renderPricing(t);
+  const cards = [...view.container.querySelectorAll('.price-grid .price')];
+  const lines = cards.map((c) => c.querySelector('[data-checkout-reassurance]')?.textContent ?? null);
+  const line = 'Charged today. Cancel any time. 14-day refund.';
+  assert.deepEqual(lines, [null, line, line, line]);
+  // Directly after the button, inside the card.
+  for (const card of cards.slice(1)) {
+    assert.equal(card.querySelector('a.btn').nextElementSibling?.dataset.checkoutReassurance, 'subscription');
+  }
+});
+
 // ===========================================================================
 // Logged in
 // ===========================================================================
@@ -328,4 +340,158 @@ test('the pricing-view beacon is still sent, once, for the pricing page', async 
   await waitFor(() => view.beacons.length > 0, { message: 'the analytics beacon' });
   await flush(() => new Promise((resolve) => setTimeout(resolve, 20)));
   assert.deepEqual(view.beacons, [{ url: '/api/analytics/pricing-view', body: { surface: 'pricing_page' } }]);
+});
+
+// ===========================================================================
+// German page: the language reaches checkout
+// ===========================================================================
+
+// /de/pricing's buttons must tell the checkout route the page was German, so
+// Stripe shows the German page and its "Zahlungspflichtig abonnieren" button.
+// The English messages are enough here: only the hrefs are under test.
+const deCheckout = (plan, interval) => `${checkout(plan, interval)}&lang=de`;
+
+test('German page, logged in: paid buttons carry lang=de to checkout', async (t) => {
+  const view = await renderPricing(t, { user: USER, locale: 'de' });
+  await waitFor(() => view.container.querySelector('.nav-signed-in'), { message: 'the signed-in nav' });
+  assert.deepEqual(view.cardCtas().slice(1).map(([, href]) => href), [
+    deCheckout('personal', 'year'),
+    deCheckout('solo', 'year'),
+    deCheckout('pro', 'year'),
+  ]);
+});
+
+// ── The Business founder price ──────────────────────────────────────────────
+// The page server prices Business from the founder pair and attaches the line
+// (founder-offer.ts) only while the offer is open; the card then prints the
+// founder line and the places left, and nothing else on the page changes.
+
+const FOUNDER_PRICES = {
+  pro: {
+    monthlyCents: 2900,
+    yearlyCents: 27840,
+    monthlyPriceConfigured: true,
+    yearlyPriceConfigured: true,
+    founder: { monthlyCents: 2900, yearlyCents: 27840, addonMonthlyCents: 300, placesLeft: 14, placesTotal: 20 },
+  },
+};
+
+function pricingHost(stripePrices) {
+  const html = renderToString(
+    createElement(NextIntlClientProvider, { locale: 'en', messages }, createElement(PricingClient, { stripePrices })),
+  );
+  const host = document.createElement('div');
+  host.innerHTML = html;
+  return { host, card: host.querySelectorAll('.price-grid .price')[3] };
+}
+
+test('founder offer open: the Business card prints the founder line and places left', () => {
+  const { host, card } = pricingHost(FOUNDER_PRICES);
+  assert.equal(
+    card.querySelector('[data-founder-line]').textContent,
+    'Founder price: $29 a month, kept for as long as you stay subscribed. Open to the first 20 companies or until 31 December 2026, whichever comes first. Extra mailboxes are $3 a month each.',
+  );
+  assert.equal(card.querySelector('[data-founder-places]').textContent, '14 of 20 places left');
+  // Annual is the default: $278.40 / 12, and the yearly total from the same pair.
+  assert.match(card.querySelector('.num').textContent, /^\$23\.20/);
+  assert.match(card.textContent, /Billed \$278\.40\/year/);
+  assert.equal(host.querySelectorAll('[data-founder-line]').length, 1);
+  assert.match(host.textContent, /Business includes 10 at the founder price above/);
+  assert.doesNotMatch(host.textContent, /Business includes 10 for \$39/);
+});
+
+test('no founder offer: no founder line anywhere and the closing band quotes $39', () => {
+  const { host } = pricingHost(undefined);
+  assert.equal(host.querySelectorAll('[data-founder-line], [data-founder-places]').length, 0);
+  assert.doesNotMatch(host.textContent, /Founder price/);
+  assert.match(host.textContent, /Business includes 10 for \$39/);
+});
+
+test('German page, logged out: lang=de is inside the post-signup destination, and on /signup', async (t) => {
+  const view = await renderPricing(t, { locale: 'de' });
+  await waitFor(() => calls.includes('getUser'), { message: 'the session check' });
+  const hrefs = view.cardCtas().slice(1).map(([, href]) => href);
+  assert.deepEqual(hrefs, ['personal', 'solo', 'pro'].map(
+    (plan) => `/signup?redirect=${encodeURIComponent(deCheckout(plan, 'year'))}&lang=de`,
+  ));
+});
+
+// ── Business billed per person (business_seat_pricing on) ───────────────────
+// The page server prices Business per person (withBusinessSeatPrices) and
+// hands the client `businessSeat` (src/lib/billing/business-seat-copy.ts).
+// The card, the table, the FAQ and the closing band then quote the seat
+// numbers from the plan data, and nothing quotes the flat $39 any more.
+
+const { businessSeatPageCopy } = await import('../../src/lib/billing/business-seat-copy.ts');
+const {
+  BUSINESS_SEAT_MONTHLY_CENTS,
+  BUSINESS_SEAT_YEARLY_CENTS,
+  BUSINESS_MIN_SEATS,
+  BUSINESS_PRIVATE_INBOXES_PER_PERSON,
+  BUSINESS_INCLUDED_INBOXES,
+} = await import('../../src/lib/stripe/plans.ts');
+
+const SEAT_PRICES = {
+  pro: {
+    monthlyCents: BUSINESS_SEAT_MONTHLY_CENTS,
+    yearlyCents: BUSINESS_SEAT_YEARLY_CENTS,
+    eurMonthlyCents: BUSINESS_SEAT_MONTHLY_CENTS,
+    eurYearlyCents: BUSINESS_SEAT_YEARLY_CENTS,
+    monthlyPriceConfigured: true,
+    yearlyPriceConfigured: true,
+    perPerson: { minPeople: BUSINESS_MIN_SEATS },
+  },
+};
+
+function seatHost() {
+  const businessSeat = businessSeatPageCopy('en', SEAT_PRICES);
+  const html = renderToString(
+    createElement(
+      NextIntlClientProvider,
+      { locale: 'en', messages },
+      createElement(PricingClient, { stripePrices: SEAT_PRICES, businessSeat }),
+    ),
+  );
+  const host = document.createElement('div');
+  host.innerHTML = html;
+  return { host, card: host.querySelectorAll('.price-grid .price')[3] };
+}
+
+const dollars = (cents) => (cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2));
+
+test('per person on: the Business card quotes the seat price, per person, and the minimum', () => {
+  const { card } = seatHost();
+  // Annual is the default: the yearly seat price over 12, per person.
+  assert.equal(
+    card.querySelector('.num').textContent,
+    `$${dollars(Math.round(BUSINESS_SEAT_YEARLY_CENTS / 12))} /person/month`,
+  );
+  assert.match(card.textContent, new RegExp(`Billed \\$${dollars(BUSINESS_SEAT_YEARLY_CENTS).replace('.', '\\.')}/year per person`));
+  assert.equal(
+    card.querySelector('[data-business-seat-minimum]').textContent,
+    `${BUSINESS_MIN_SEATS} people minimum. You pay for each person who connects a mailbox; anyone without one of their own is free, whatever their role.`,
+  );
+  const features = [...card.querySelectorAll('li')].map((li) => li.textContent);
+  assert.ok(features.includes(`Private mailboxes for each person, up to ${BUSINESS_PRIVATE_INBOXES_PER_PERSON} each`));
+  assert.ok(features.includes(`${BUSINESS_INCLUDED_INBOXES} company-wide mailboxes included, then $3 a month each`));
+  assert.ok(!features.some((f) => /no extra cost/.test(f)));
+});
+
+test('per person on: the table, FAQ and closing band follow, and $39 is gone', () => {
+  const { host } = seatHost();
+  const text = host.textContent;
+  assert.match(text, /Recipient rules for outgoing mail/);
+  assert.match(text, /Private mailboxes for each person/);
+  assert.match(text, /Unlimited, billed per person with a mailbox/);
+  assert.match(text, new RegExp(`Business is \\$${dollars(BUSINESS_SEAT_MONTHLY_CENTS)} per person a month for a team`));
+  assert.doesNotMatch(text, /\$39|\$374\.40|Unlimited, no extra cost/);
+  // The other cards are untouched.
+  const cards = host.querySelectorAll('.price-grid .price');
+  assert.equal(cards[2].querySelector('[data-business-seat-minimum]'), null);
+});
+
+test('per person off: no seat line anywhere, the page as before', () => {
+  const { host } = pricingHost(undefined);
+  assert.equal(host.querySelectorAll('[data-business-seat-minimum]').length, 0);
+  assert.doesNotMatch(host.textContent, /per person|Recipient rules/);
 });

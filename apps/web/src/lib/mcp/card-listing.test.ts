@@ -350,6 +350,29 @@ const SQL_ALLOWED = new Set([
   // Self-host's port of 20260916160000: adds the nullable column with no
   // default and writes no value, exactly like the hosted migration.
   'self-host/db/migrations/0005_api_keys_parity.sql',
+  // mcp_tools_call_preflight returns the api_keys row for a tools/call, so it
+  // must hand back the same columns lookupApiKey selects, this one included.
+  // It READS the column and never writes it; the compare-and-swap stays in
+  // TypeScript through the constant.
+  'supabase/migrations/20261020100000_mcp_tools_call_preflight.sql',
+  // mcp_tools_call_gate, its successor, for the same reason: it reads the
+  // column into the key row and never writes it.
+  'supabase/migrations/20261020214737_mcp_tools_call_gate.sql',
+  // Re-creates mcp_tools_call_gate verbatim with three workspace payment
+  // columns added; the key row, this column included, is only read.
+  'supabase/migrations/20261024190000_payment_issue_columns.sql',
+  // The referral migration re-creates mcp_tools_call_gate whole (to return
+  // referral_personal_until); it reads the column the same way and never
+  // writes it.
+  'supabase/migrations/20261025090000_referrals.sql',
+  // Re-creates mcp_tools_call_gate to return card_listed as well; reads this
+  // column into the key row as before and never writes it. Keep in step with
+  // the Deno twin.
+  'supabase/migrations/20261027150000_tools_call_gate_card_listed.sql',
+  // The draft card rollout marks every live key's listing stale in one
+  // statement, the same write invalidateCardListings() makes per workspace.
+  // Keep in step with the Deno twin.
+  'supabase/migrations/20261027160000_draft_editor_for_everyone.sql',
 ]);
 
 /**
@@ -616,7 +639,6 @@ test("the file list is git's, not a hand-maintained root list", () => {
   for (
     const tree of [
       'apps/web/components/',
-      'supabase/functions/gmail-token-refresh/',
       'supabase/functions/outlook-token-refresh/',
       'supabase/functions/synthetic-monitor/',
       'supabase/functions/system-notify/',

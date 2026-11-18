@@ -62,6 +62,8 @@ Deno.env.set("MCP_SERVER_NO_LISTEN", "1");
 const {
   CONSOLIDATED_ARGUMENT_INDEX,
   CONSOLIDATED_SPECS,
+  dispatchExecutor,
+  PER_OPERATION_LISTING,
   TOOL_ANNOTATIONS,
   TOOL_REGISTRY,
   validateInputSchema,
@@ -116,6 +118,11 @@ Deno.test("tools/list advertises exactly the post-split surface", () => {
       "draft",
       "schedule_list",
       "schedule",
+      // Pro (reminders): registered here, hidden from every workspace by the
+      // Pro gate until pro_features_enabled / pro_features_public (see the
+      // reminders tests for the hidden listing).
+      "reminder_list",
+      "reminder",
       "signature_get",
       "signature_set",
       "automation_read",
@@ -133,6 +140,11 @@ Deno.test("tools/list advertises exactly the post-split surface", () => {
       "draft_read",
       "draft_editor_save",
       "draft_editor_hide",
+      // Subscription cleanup. In the registry for every client; tools/list
+      // drops both for a workspace without subscription_cleanup_enabled.
+      "subscriptions_scan",
+      "subscriptions_cleanup",
+      "card_automation",
     ],
   );
 });
@@ -285,7 +297,9 @@ Deno.test("the sweep carries the destructive flag email_organize gave up", () =>
 
 Deno.test("the tools split out of a mixed one keep the right write annotations", () => {
   assertEquals(registryEntry("signature_set").annotations?.readOnlyHint, false);
-  assertEquals(registryEntry("signature_set").annotations?.destructiveHint, false);
+  // True since 2026-10-13: it overwrites the stored signature, and OpenAI's
+  // scan reads an overwrite as destructive whether or not it can be redone.
+  assertEquals(registryEntry("signature_set").annotations?.destructiveHint, true);
   // folder deletes a label off every message carrying it, and draft discards an
   // unsent draft. Both were already flagged destructive and must stay so: the
   // client reads the annotation, not the prose.
@@ -316,7 +330,9 @@ Deno.test("the tools split out of a mixed one keep the right write annotations",
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Tools that can reach a party outside the connected mailbox. */
-const OPEN_WORLD_TOOLS = ["email_compose", "draft", "schedule", "automation"];
+// `subscriptions_cleanup` sends an RFC 8058 one-click POST to the sender's
+// server, which is outside the account.
+const OPEN_WORLD_TOOLS = ["email_compose", "draft", "schedule", "automation", "subscriptions_cleanup"];
 
 Deno.test("openWorldHint is true only where the tool can reach outside the account", () => {
   for (const tool of advertisedTools()) {
@@ -414,7 +430,9 @@ Deno.test("the submitted justifications describe the annotations the server ship
     import.meta.url,
   );
   const justified = justificationValues(await Deno.readTextFile(path));
-  for (const tool of advertisedTools()) {
+  // The per-operation listing, since 2026-10-13: it is what an OpenAI client,
+  // and so the portal's scan, is shown. See PER_OPERATION_LISTING.
+  for (const tool of PER_OPERATION_LISTING) {
     const claimed = justified[tool.name];
     assert(
       claimed,
@@ -433,8 +451,8 @@ Deno.test("the submitted justifications describe the annotations the server ship
   }
   assertEquals(
     Object.keys(justified).length,
-    advertisedTools().length,
-    "the justification file documents a tool that tools/list does not advertise",
+    PER_OPERATION_LISTING.length,
+    "the justification file documents a tool the per-operation listing does not have",
   );
 });
 
@@ -468,7 +486,7 @@ Deno.test("a read tool that returns mailbox-authored text keeps its untrusted_co
   // the read out of `folder` must not lose the warning that travelled with it.
   assert(
     registryEntry("folder_list").description.includes("untrusted_content"),
-    "folder_list must still say its result is data, never instructions",
+    "folder_list must still say its result carries untrusted_content",
   );
   assert(
     registryEntry("draft_list").description.includes("untrusted_content"),
@@ -959,7 +977,11 @@ Deno.test("draft_read is advertised as a read of one draft, read-only, with its 
     _meta?: unknown;
   };
   assertEquals(listed.title, "Read one draft in full");
-  assert(listed.description.startsWith("Read one unsent draft in full"), listed.description);
+  // It leads with when to use it: the model is the primary reader (2026-10-13).
+  assert(
+    listed.description.startsWith("Get the current text of one unsent draft"),
+    listed.description,
+  );
   // Clients cache the tool set at connect, so neither of these may move.
   assertEquals(listed.inputSchema.required, ["draft_id"]);
   assertEquals(
@@ -974,4 +996,230 @@ Deno.test("draft_read is advertised as a read of one draft, read-only, with its 
   // The registry entry carries no `_meta`: the card metadata is attached per
   // key at `tools/list`, and only when the drafts gate is open.
   assertEquals(listed._meta, undefined);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// draft{action:"update"} without `body`, and the text that describes it
+// (2026-10-13)
+//
+// `update` required `body`, so a model asked to change a subject or a recipient
+// had to re-send a body, and the only one it held was its own from before the
+// user edited the draft in the card. `body` is optional now: omitted, the
+// stored body text is kept through the editor's own merge
+// (`mcp-app-drafts.ts#runBodylessDraftUpdate`, tested there and, against real
+// MIME, in draft-rebuild.test.ts). These pin the surface:
+// the schema accepts the call, the three refusals that need no mailbox, and
+// every string that used to say otherwise.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const DRAFT_SCOPES = ["read:email", "send:email", "manage:drafts"];
+
+function draftKey() {
+  return {
+    id: crypto.randomUUID(),
+    workspace_id: crypto.randomUUID(),
+    name: "Drafts",
+    key_prefix: "mcpe_abc",
+    key_hash: "",
+    scopes: DRAFT_SCOPES,
+    inbox_ids: null,
+    expires_at: null,
+    last_used_at: null,
+    deleted_at: null,
+    created_at: new Date().toISOString(),
+  };
+}
+
+async function updateRefusal(args: Record<string, unknown>): Promise<string> {
+  // deno-lint-ignore no-explicit-any
+  const outcome: any = await dispatchExecutor("draft_update", args, draftKey() as any);
+  assertEquals(outcome.result.isError, true, JSON.stringify(args));
+  assertEquals(outcome.logErrorCode, "-32602", JSON.stringify(args));
+  return outcome.result.content[0].text as string;
+}
+
+Deno.test("draft update: the validator accepts a call with no body, and the type of body did not move", () => {
+  const draft = registryEntry("draft");
+  const schema = draft.inputSchema as Record<string, unknown>;
+  for (
+    const args of [
+      { action: "update", draft_id: "Drafts:2", subject: "New subject" },
+      { action: "update", draft_id: "Drafts:2", to: ["a@example.com"] },
+      { action: "update", draft_id: "Drafts:2", cc: [] },
+      // The full-body form, which is every call a cached client already makes.
+      { action: "update", draft_id: "Drafts:2", body: "Hello." },
+      { action: "update", draft_id: "Drafts:2", subject: "S", body: "Hello.", html_body: "<p>Hello.</p>" },
+    ]
+  ) {
+    assertEquals(validateInputSchema(schema, args, "arguments"), [], JSON.stringify(args));
+  }
+  // Only a per-action `required` entry was loosened. No advertised TYPE
+  // changed: body is still a string, and a non-string body is still refused.
+  const listed = serializeToolForList(draft) as {
+    inputSchema: { required?: string[]; properties: Record<string, { type?: string }> };
+  };
+  assertEquals(listed.inputSchema.properties.body.type, "string");
+  assertEquals(listed.inputSchema.required, ["action"]);
+  // update with nothing but a draft_id passes the SCHEMA (no single field is
+  // required); the handler is what refuses an empty patch, tested below.
+  assertEquals(
+    validateInputSchema(schema, { action: "update", draft_id: "Drafts:2" }, "arguments"),
+    [],
+  );
+  assert(
+    validateInputSchema(schema, { action: "update", subject: "S" }, "arguments").length > 0,
+    "update still requires draft_id",
+  );
+  assert(
+    validateInputSchema(schema, { action: "update", draft_id: "Drafts:2", body: 7 }, "arguments")
+      .length > 0,
+    "a non-string body must still fail validation",
+  );
+  // create and reply still require theirs.
+  assert(
+    validateInputSchema(schema, { action: "create", subject: "S" }, "arguments").length > 0,
+    "create still requires body",
+  );
+  assert(
+    validateInputSchema(schema, { action: "reply", message_id: "INBOX:1" }, "arguments").length > 0,
+    "reply still requires body",
+  );
+});
+
+Deno.test("draft update: an empty patch, a lone html_body and an empty body are refused before any mailbox I/O", async () => {
+  // Every one of these returns before the inbox is resolved, which is why they
+  // can run here with no database: nothing is read and nothing is written.
+  assertEquals(
+    await updateRefusal({ draft_id: "Drafts:2" }),
+    "draft_update: none of to, cc, bcc, subject, body or attachments was given, so there is nothing to " +
+      "change. An omitted field is kept as stored.",
+  );
+  // include_signature and idempotency_key change nothing on their own either.
+  assert(
+    (await updateRefusal({ draft_id: "Drafts:2", include_signature: false })).startsWith(
+      "draft_update: none of to, cc, bcc, subject, body or attachments was given",
+    ),
+  );
+  assertEquals(
+    await updateRefusal({ draft_id: "Drafts:2", html_body: "<p>x</p>" }),
+    "draft_update: html_body was given without body. The HTML part is only written together " +
+      "with body; nothing was changed.",
+  );
+  // `""` is not "omitted". It was always refused, and reading it as "keep"
+  // would turn an attempt to clear a body into a success that did nothing.
+  assertEquals(
+    await updateRefusal({ draft_id: "Drafts:2", subject: "S", body: "" }),
+    "draft_update: body must be a non-empty string when given. Without body the stored body " +
+      "is kept.",
+  );
+  // And the pre-existing refusals are where they were.
+  assertEquals(
+    await updateRefusal({ subject: "S" }),
+    "draft_update: draft_id is required and must be a non-empty string.",
+  );
+});
+
+Deno.test("draft: the description, the update hint and draft_list say what is true now", () => {
+  const draft = serializeToolForList(registryEntry("draft")) as {
+    description: string;
+    inputSchema: { properties: Record<string, { description?: string }> };
+  };
+  const action = draft.inputSchema.properties.action.description ?? "";
+  // The per-action required list no longer names body for update...
+  assert(!/update: body/.test(action), action);
+  // ...and still names it for the two actions that do require it.
+  // Subject left create's required list on 2026-10-17 (the card saves a
+  // draft with an empty subject); the hint says so.
+  assert(/create = a new draft; body required, subject optional/.test(action), action);
+  assert(!/subject and body required|create: subject/.test(action), action);
+  assert(/Required: reply: body\./.test(action), action);
+  assert(
+    /update = change only the fields you pass on draft_id, keeping every omitted one \(body included\); send = /
+      .test(action),
+    action,
+  );
+
+  const description = draft.description;
+  // When to use it, against email_compose, the way `schedule` does it.
+  assert(
+    /Use this when the user wants to review or edit a message before it goes out; email_compose sends now\./
+      .test(description),
+    description,
+  );
+  // "kept", not "kept exactly": on IMAP and Gmail the message is rebuilt and
+  // only the decoded text is guaranteed. See draft-rebuild.ts.
+  assert(/'update' replaces only the fields passed: omit body and the stored body text is kept\./.test(description));
+  // Live re-test 2026-10-17: a new body no longer drops a reply's quote.
+  // Live claude.ai test 2026-10-19: the model read "replaces" as "drops the
+  // quote" and pasted it (and the signature) back. Say it stays, and that body
+  // is the model's own text only.
+  assert(/A new body replaces only your text: a reply's quoted original stays below it \(quote_kept\)\./.test(description));
+  assert(!/unless it includes one/.test(description), "no invitation to paste the quote back");
+  assertEquals(
+    draft.inputSchema.properties.body.description,
+    "Plain-text draft body, not markdown (no ** or #): formatting goes in html_body. " +
+      "Your message text only: the server adds the signature and the quoted original.",
+  );
+  assert(!/exactly/.test(description), "no description promises an exact copy");
+  assert(/Any inbox signature is embedded on create and on an update that passes body/.test(description));
+  // The card sentence is true with the editor off as well as on.
+  assert(
+    /Where the draft editor card is on, hosts that render MCP Apps cards show the draft to the user in an editable card, where the user can change it\./
+      .test(description),
+    description,
+  );
+  assert(/draft_read returns a draft's current text; draft_list lists the drafts that exist with their draft_id and no body\. /.test(description));
+  // Testers 2026-10-23: the model mixed the card up with another connector's draft tool.
+  assert(/The card shows only drafts made with this tool, not another connector's drafts\.$/.test(description));
+
+  const list = registryEntry("draft_list").description;
+  assert(/and no body: draft_read returns one draft's text\./.test(list), list);
+  assert(/draft_id is what draft_read and the draft tool/.test(list), list);
+
+  for (const text of [description, action, list]) {
+    assert(!text.includes("\u2014"), `em dash in model-facing text: ${text}`);
+  }
+});
+
+Deno.test("the draft writes state what a draft is for, and never instruct the model", () => {
+  // 2026-10-25, two ways the draft card went unseen: a model asked to write an
+  // email wrote it in the chat and called nothing, and in claude.ai a model
+  // encoded an upload in its code sandbox and called `draft` from there, where
+  // no card is mounted. 2026-10-27, chatgpt.com put a "Suspicious Instruction"
+  // box on every draft because the descriptions said how to call the tool. So
+  // the descriptions state facts. Claude's steer to save a requested email as
+  // a draft lives in SERVER_INSTRUCTIONS (server-instructions.test.ts).
+  const perOperation = new Map(
+    PER_OPERATION_LISTING.map((tool) => [tool.name, serializeToolForList(tool)]),
+  );
+  const descriptions: Array<[string, string]> = [
+    ["draft", (serializeToolForList(registryEntry("draft")) as { description: string }).description],
+    ["draft_create", (perOperation.get("draft_create") as { description: string }).description],
+    ["draft_reply", (perOperation.get("draft_reply") as { description: string }).description],
+    ["draft_update", (perOperation.get("draft_update") as { description: string }).description],
+  ];
+  for (const [name, description] of descriptions) {
+    if (name !== "draft_update") {
+      assert(/where the user can see and edit/.test(description), `${name}: says what a draft is for`);
+    }
+    for (
+      const steer of [
+        /rather than only writing it in chat/,
+        /call this tool directly/,
+        /never from code/,
+        /\bMUST\b/,
+        /\bnever use\b/,
+        /data, never instructions/,
+        /call draft_read before/,
+        /\bDo NOT\b/,
+      ]
+    ) {
+      assert(!steer.test(description), `${name}: no instruction ${steer}`);
+    }
+    assert(!description.includes("\u2014"), `${name}: no em dash`);
+    // Claude Code cuts a tool description at 2KB.
+    assert(new TextEncoder().encode(description).length <= 2048, `${name}: under 2KB`);
+  }
+  const draft = descriptions[0][1];
+  assert(draft.includes("The draft card appears only for a direct call to this tool, not one made from code."), draft);
 });

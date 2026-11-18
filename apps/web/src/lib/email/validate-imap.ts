@@ -1,8 +1,10 @@
 import * as net from 'net';
 import * as tls from 'tls';
 import { sanitizeAuthDiagnostic } from './connection-config.ts';
+import { legacyTlsOptions } from './legacy-tls.ts';
 import {
   chooseImapPasswordMechanism,
+  shouldRetryPlainWithLogin,
   cramMd5Response,
   imapLoginArgument,
   parseImapCapabilities,
@@ -65,6 +67,13 @@ export interface ImapCredential {
    * a host from a request MUST set it.
    */
   pinnedAddress?: string;
+  /**
+   * Opens the TCP leg somewhere other than a direct dial: an already-connected
+   * tunnel to `host:port` (see mail-relay.ts). Implicit TLS only. TLS is still
+   * negotiated here, against `host`, so whatever carries the tunnel sees
+   * ciphertext and certificate validation is unchanged.
+   */
+  tunnel?: () => Promise<net.Socket>;
 }
 
 /**
@@ -341,12 +350,18 @@ export async function authenticateImapPassword(
   username: string,
   password: string
 ): Promise<TaggedResponse & { token: string; mechanism: ImapPasswordMechanism }> {
-  const mechanism = chooseImapPasswordMechanism(await readCapabilities(socket, greeting));
+  const caps = await readCapabilities(socket, greeting);
+  const mechanism = chooseImapPasswordMechanism(caps);
   const result = mechanism === 'LOGIN'
     ? await authenticateLogin(socket, username, password)
     : mechanism === 'CRAM-MD5'
       ? await authenticateCramMd5(socket, username, password)
       : await authenticatePlain(socket, username, password);
+  // A PLAIN refused as a mechanism (T-Online) never reached the password
+  // check: LOGIN on the same connection is the first real one.
+  if (mechanism === 'PLAIN' && shouldRetryPlainWithLogin(caps, result.status, result.text)) {
+    return { ...(await authenticateLogin(socket, username, password)), mechanism: 'LOGIN' };
+  }
   return { ...result, mechanism };
 }
 
@@ -371,7 +386,8 @@ function connectTls(host: string, port: number, servername: string, onSocket: (s
     // match. Splitting them is what lets the pinned address be an IP without
     // weakening certificate validation: Node's checkServerIdentity prefers
     // `servername` over `host`.
-    const socket = tls.connect({ host, port, servername, rejectUnauthorized: true });
+    // legacyTlsOptions is empty except for docomo's exact hosts (legacy-tls.ts).
+    const socket = tls.connect({ host, port, servername, rejectUnauthorized: true, ...legacyTlsOptions(servername) });
     onSocket(socket);
     socket.once('secureConnect', () => { socket.removeListener('error', reject); resolve(socket); });
     socket.once('error', reject);
@@ -380,7 +396,7 @@ function connectTls(host: string, port: number, servername: string, onSocket: (s
 
 function upgradeTls(host: string, plain: net.Socket, onSocket: (socket: net.Socket) => void): Promise<tls.TLSSocket> {
   return new Promise((resolve, reject) => {
-    const socket = tls.connect({ socket: plain, servername: host, rejectUnauthorized: true });
+    const socket = tls.connect({ socket: plain, servername: host, rejectUnauthorized: true, ...legacyTlsOptions(host) });
     onSocket(socket);
     socket.once('secureConnect', () => { socket.removeListener('error', reject); resolve(socket); });
     socket.once('error', reject);
@@ -409,7 +425,13 @@ export async function validateImapCredential(cred: ImapCredential): Promise<Imap
       let greeting: string | null = null;
       if (security === 'tls') {
         phase = 'tls';
-        socket = await connectTls(dialHost, cred.port, cred.host, (value) => { activeSocket = value; });
+        if (cred.tunnel) {
+          const plain = await cred.tunnel();
+          activeSocket = plain;
+          socket = await upgradeTls(cred.host, plain, (value) => { activeSocket = value; });
+        } else {
+          socket = await connectTls(dialHost, cred.port, cred.host, (value) => { activeSocket = value; });
+        }
         phase = 'greeting';
         greeting = await readLine(socket);
         if (!greeting.startsWith('* OK')) {

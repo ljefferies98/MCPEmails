@@ -41,3 +41,29 @@ check	workspaces	workspaces_acquisition_utm_source_check	marketing acquisition a
 unique	activity_log	created_at,id	hosted range-partitions activity_log by created_at, which forces it into the primary key
 unique	activity_log	id	self-host keeps activity_log unpartitioned with a plain primary key
 unique	inboxes	email_address,workspace_id where (deleted_at IS NULL)	redundant on both sides: the full unique key on (workspace_id, email_address) already exists (self-host idx_inboxes_workspace_email)
+column	users	deleted_at	hosted account deletion and the 30-day purge; the self-host operator is never deleted and the server reads only users.email
+column	users	sso_provider_id	SAML SSO users; no SSO on self-host
+unique	users	email	hosted replaces the plain unique email with the SSO-aware pair below; self-host keeps one operator with a plain unique email
+unique	users	email where (sso_provider_id IS NULL)	SAML SSO: same email allowed once per identity provider
+unique	users	email,sso_provider_id where (sso_provider_id IS NOT NULL)	SAML SSO: same email allowed once per identity provider
+column	workspaces	acquisition_country	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_country_check	marketing acquisition attribution
+column	workspaces	acquisition_device	marketing acquisition attribution, set by the web app at sign-up
+check	workspaces	workspaces_acquisition_device_check	marketing acquisition attribution
+column	workspaces	heard_about	dashboard "how did you hear about us" question
+column	workspaces	heard_about_at	dashboard "how did you hear about us" question
+column	workspaces	heard_about_other	dashboard "how did you hear about us" question
+check	workspaces	workspaces_heard_about_check	dashboard "how did you hear about us" question
+check	workspaces	workspaces_heard_about_at_check	dashboard "how did you hear about us" question
+check	workspaces	workspaces_heard_about_other_check	dashboard "how did you hear about us" question
+column	workspaces	annual_switch_dismiss_count	Stripe annual-switch card in the dashboard
+column	workspaces	annual_switch_dismissed_at	Stripe annual-switch card in the dashboard
+column	workspaces	grace_end_note_seen_at	hosted Free-trial grace note in the dashboard
+column	workspaces	inbox_swapped_at	hosted plan-limit inbox swap
+column	workspaces	onboarding_completed_at	hosted dashboard onboarding
+column	workspaces	onboarding_reset_at	hosted dashboard onboarding
+column	workspaces	onboarding_welcome_shown_at	hosted dashboard onboarding (claim_onboarding_welcome is intentionally absent)
+column	workspaces	plan_summary_dismissed_at	hosted dashboard plan summary
+column	workspaces	pro_unlimited_inboxes_exempt	hosted Pro inbox cap; no plan limits on self-host
+column	workspaces	referral_enabled	hosted referral program rollout gate
+column	workspaces	draft_editor_enabled	hosted turned the MCP Apps draft editor on for everyone (default true); self-host keeps it opt-in so draft results do not change under existing clients

@@ -1,27 +1,42 @@
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { localePath, OG_LOCALE, APP_URL } from '@/i18n/seo';
 import { routing } from '@/i18n/routing';
-import { getAllPosts, getLocalizedPost, getAuthor } from '@/lib/blog/posts';
+import { languageTag } from '@/i18n/locale-policy.mjs';
+import { getAllPosts, getPost, getPostLocales, getLocalizedPost, getAuthor } from '@/lib/blog/posts';
 import { renderMarkdown, readingTime } from '@/lib/blog/markdown';
+import { localizeHref } from '@/lib/blog/links.mjs';
+import { tagLabelMap } from '@/lib/blog/tag-labels.mjs';
+import { withReadingLangEscaped } from '@/i18n/reading-lang.mjs';
 import BlogPostClient from '../../../../components/marketing/BlogPostClient';
+import { requireLocale } from '@/i18n/require-locale';
 
-/** Pre-render every post in every locale (untranslated locales fall back to English). */
+/**
+ * Pre-render each post in the locales it is translated into. Any other locale
+ * 308s to the English post (see the page below), so it is not a page to build.
+ */
 export function generateStaticParams() {
   return routing.locales.flatMap((locale) =>
-    getAllPosts().map((p) => ({ locale, slug: p.slug })),
+    getAllPosts()
+      .filter((p) => getPostLocales(p).includes(locale))
+      .map((p) => ({ locale, slug: p.slug })),
   );
+}
+
+/** Locales a post slug is translated into, for localizeHref. */
+function postLocales(slug) {
+  const post = getPost(slug);
+  return post ? getPostLocales(post) : [];
 }
 
 /**
  * hreflang + canonical for a post. We only advertise the locales the post is
- * actually translated into; every other locale serves the English fallback and
- * canonicalises to the English URL, so search engines never index a
- * fake-localized duplicate.
+ * actually translated into; every other locale 308s to the English post, so
+ * search engines never index a fake-localized duplicate.
  */
 function buildAlternates(post, locale, path) {
   const languages = {};
-  for (const l of post.locales) languages[l] = localePath(l, path);
+  for (const l of post.locales) languages[languageTag(l)] = localePath(l, path);
   languages['x-default'] = localePath('en', path);
   const canonicalLocale = post.translated ? locale : 'en';
   return { canonical: localePath(canonicalLocale, path), languages, canonicalLocale };
@@ -29,9 +44,10 @@ function buildAlternates(post, locale, path) {
 
 export async function generateMetadata({ params }) {
   const { locale, slug } = await params;
+  requireLocale(locale);
   const post = getLocalizedPost(slug, locale);
   if (!post) return {};
-  const author = getAuthor(post);
+  const author = getAuthor(post, locale);
   const path = `/blog/${slug}`;
   const { canonical, languages, canonicalLocale } = buildAlternates(post, locale, path);
   return {
@@ -45,7 +61,7 @@ export async function generateMetadata({ params }) {
     openGraph: {
       type: 'article',
       url: canonical,
-      title: `${post.title} · mcpemails`,
+      title: `${post.title} · MCPEmails`,
       description: post.description,
       locale: OG_LOCALE[canonicalLocale],
       publishedTime: post.publishedAt,
@@ -56,7 +72,7 @@ export async function generateMetadata({ params }) {
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${post.title} · mcpemails`,
+      title: `${post.title} · MCPEmails`,
       description: post.description,
       images: [post.cover],
     },
@@ -65,14 +81,25 @@ export async function generateMetadata({ params }) {
 
 export default async function BlogPostPage({ params }) {
   const { locale, slug } = await params;
+  requireLocale(locale);
   setRequestLocale(locale);
 
   const post = getLocalizedPost(slug, locale);
   if (!post) notFound();
+  // A locale the post has no translation in used to serve the English body
+  // under lang="es" (or nb, fr, zh), canonicalised to the English URL. Google
+  // filed all of them under "Alternate page with proper canonical tag", and the
+  // reader got English anyway. Send both to the English post instead. This is
+  // generic on purpose: a new post with no zh translation redirects the same way.
+  if (!post.translated) permanentRedirect(`/blog/${slug}`);
 
   const t = await getTranslations({ locale, namespace: 'blog' });
-  const author = getAuthor(post);
-  const { html, headings } = renderMarkdown(post.content);
+  const author = getAuthor(post, locale);
+  const { html, headings } = renderMarkdown(post.content, {
+    // Locale prefix where the target exists in this locale, and ?lang= on
+    // signup and login links so the form opens in the language being read.
+    hrefFor: (href) => withReadingLangEscaped(localizeHref(href, locale, { postLocales }), locale),
+  });
   const readingMinutes = readingTime(post.content);
   const path = `/blog/${slug}`;
   const { canonical, canonicalLocale } = buildAlternates(post, locale, path);
@@ -100,7 +127,7 @@ export default async function BlogPostPage({ params }) {
     },
     publisher: {
       '@type': 'Organization',
-      name: 'mcpemails',
+      name: 'MCPEmails',
       url: APP_URL,
       logo: { '@type': 'ImageObject', url: `${APP_URL}/logo-mark.svg` },
     },
@@ -123,12 +150,15 @@ export default async function BlogPostPage({ params }) {
     cover: post.cover,
     coverAlt: post.coverAlt,
     tags: post.tags,
+    tagLabels: tagLabelMap(post.tags, locale),
     publishedAt: post.publishedAt,
     updatedAt: post.updatedAt,
     readingMinutes,
     html,
     headings,
     author,
+    // The locales this post is really translated into, for the language switcher.
+    locales: post.locales,
   };
 
   return (

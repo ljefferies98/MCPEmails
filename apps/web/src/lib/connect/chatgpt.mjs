@@ -1,0 +1,158 @@
+/**
+ * The "Use <provider> in ChatGPT" block on /connect/<provider> pages, and the
+ * matching FAQ entry.
+ *
+ * WHY. ChatGPT-sourced signups landing on /connect/* fell week over week while
+ * ChatGPT's own answers to "connect Yahoo mail to ChatGPT" recommended other
+ * products. The provider pages said how to connect a mailbox, then said
+ * nothing about ChatGPT. This block says it once, in the same words on every
+ * page, with the provider name filled in.
+ *
+ * WHICH PAGES. Every provider whose status is `supported`. The three `limited`
+ * pages (HEY, Proton Mail, Tuta) do not get it: the block promises the mailbox
+ * connects. The FAQ entry is left off /connect/yahoo, whose own copy carries a
+ * ChatGPT question of its own.
+ *
+ * WHERE THE COPY LIVES. src/lib/connect/chatgpt/<locale>.json, loaded on the
+ * server by the page that renders it. Not in the `connect` next-intl
+ * namespace: that namespace is serialised into every marketing page (see
+ * MARKETING_NAMESPACES in src/i18n/request.ts), and this is page-only copy.
+ *
+ * WHAT IT CLAIMS (OpenAI's help pages, checked 2026-10-26, plan list re-read
+ * 2026-11-11 at help.openai.com/en/articles/12584461; /docs/chatgpt and the
+ * connect-chatgpt-to-email post say the same):
+ *   - a custom MCP server added on chatgpt.com (not the mobile app) under
+ *     Plugins, Personal, Add, Add custom MCP server; no developer mode needed
+ *   - server URL https://mcpemails.com/api/mcp, OAuth authentication
+ *   - needs a paid plan: OpenAI names Business and Enterprise/Edu for full
+ *     support and Pro for read/fetch only; Go and Plus are not mentioned
+ *     (never claim Free, Go or Plus)
+ *   - used by typing @ in a chat and picking MCPEmails, once per message
+ *   - mail fetched live, never stored
+ *
+ * THE CHATGPT PLUGIN DIRECTORY. MCPEmails is listed there as "Any Mailbox"
+ * (OpenAI renamed the app directory to the plugin directory on 2026-07-09;
+ * help.openai.com/en/articles/20001256, read 2026-11-11: Plugins in the
+ * sidebar, Install plugin, then Connect, then @ in a chat; the directory is
+ * visible on every ChatGPT plan, but whether a given plugin can be installed
+ * "depends on your plan, workspace, role, region". We have not checked which
+ * plans can install Any Mailbox, so copy never names plans for it). The same
+ * directory serves ChatGPT and Codex. With CHATGPT_DIRECTORY_LISTING_URL set, the
+ * block shows the `directory*` copy (install the plugin) instead of the
+ * custom-server steps, links to the listing, and the FAQ answer switches to
+ * `directoryFaqA`. A null URL brings the custom-server steps back. Re-read the
+ * copy against the live listing when the URL is set.
+ */
+
+/**
+ * The name the ChatGPT plugin directory shows. OpenAI does not allow "MCP" in
+ * a plugin's name, so the listing is not called MCPEmails. The developer shown
+ * is MCPEmails.
+ */
+export const CHATGPT_APP_NAME = 'Any Mailbox';
+
+/**
+ * The marker in the placeholder listing URL. Written in two halves so that
+ * replacing the placeholder URL with one sed leaves this alone, and
+ * src/lib/connect/chatgpt-listing.test.mjs keeps failing until it is replaced.
+ */
+export const CHATGPT_DIRECTORY_LISTING_PLACEHOLDER_MARK = 'ANY_MAILBOX_LISTING_' + 'URL_TBD';
+
+/**
+ * The Any Mailbox listing in the ChatGPT plugin directory (published
+ * 2026-11-16). The one place it is written down: /connect/<provider>,
+ * /docs/chatgpt, the home FAQ, the JSON-LD alternateName and llms.txt
+ * (generated, `npm run gen:llms`) all read it from here. Until OpenAI's
+ * listing URL is known it is a placeholder, and the listing test fails on
+ * purpose. It is OpenAI's page, so it carries no UTM of ours: installs that
+ * start there are attributed as `connector_chatgpt` by
+ * connectorSourceFromAuthorize in src/lib/acquisition-context.mjs.
+ */
+export const CHATGPT_DIRECTORY_LISTING_URL = 'https://chatgpt.com/plugins/plugin_asdk_app_6ace084f569081919174189f44ccc61e';
+
+/** The token copy uses where the listing URL goes (home FAQ). */
+export const LISTING_URL_TOKEN = '{listingUrl}';
+
+/**
+ * Split copy on the listing token, for a renderer that turns the token into a
+ * link: `['before ', 'after']` for one token. Text with no token comes back as
+ * a single part.
+ */
+export function splitOnListingUrl(text) {
+  return String(text).split(LISTING_URL_TOKEN);
+}
+
+/** The same copy as plain text, with the URL written out (JSON-LD, meta). */
+export function fillListingUrl(text, listingUrl = CHATGPT_DIRECTORY_LISTING_URL) {
+  return String(text).replaceAll(LISTING_URL_TOKEN, listingUrl ?? '');
+}
+
+export const CHATGPT_LOCALES = Object.freeze(['en', 'es', 'fr', 'nb', 'zh', 'de', 'pt', 'ja']);
+export const CHATGPT_BLOG_SLUG = 'connect-chatgpt-to-email';
+export const CHATGPT_DOCS_PATH = '/docs/chatgpt';
+
+/** Pages that carry their own ChatGPT FAQ entry, so this one would repeat it. */
+const OWN_CHATGPT_FAQ = new Set(['yahoo']);
+
+export function showsChatgpt(provider) {
+  return Boolean(provider) && provider.status === 'supported';
+}
+
+export function showsChatgptFaq(provider) {
+  return showsChatgpt(provider) && !OWN_CHATGPT_FAQ.has(provider.slug);
+}
+
+export async function getChatgptCopy(locale) {
+  const safe = CHATGPT_LOCALES.includes(locale) ? locale : 'en';
+  const mod = await import(`./chatgpt/${safe}.json`);
+  return mod.default;
+}
+
+/** Fill `{provider}`. Plain replacement: this copy is not ICU. */
+function fill(text, providerName) {
+  return String(text).replaceAll('{provider}', providerName);
+}
+
+/**
+ * What the block shows for one provider. `listingUrl` defaults to the flag and
+ * is a parameter only so the directory variant can be tested before it ships.
+ */
+export function chatgptSection(copy, providerName, listingUrl = CHATGPT_DIRECTORY_LISTING_URL) {
+  const viaDirectory = Boolean(listingUrl);
+  return {
+    eyebrow: copy.eyebrow,
+    title: fill(copy.title, providerName),
+    sub: fill(viaDirectory ? copy.directorySub : copy.sub, providerName),
+    steps: (viaDirectory ? copy.directorySteps : copy.steps).map((s) => fill(s, providerName)),
+    listing: viaDirectory ? { href: listingUrl, label: copy.directoryLink } : null,
+    docs: { href: CHATGPT_DOCS_PATH, label: copy.docsLink },
+    blogLabel: copy.blogLink,
+  };
+}
+
+/**
+ * Where the "How to connect ChatGPT to your email" link points. `postLocales`
+ * is getPostLocales() of the post, passed in by the page so this module stays
+ * free of the blog registry. A locale the post is translated into gets the
+ * locale-aware link (next-intl adds the prefix); any other gets the English
+ * post at its unprefixed URL, never a /<locale>/blog/... page that only
+ * canonicalises back to English.
+ */
+export function chatgptBlogLink(locale, postLocales) {
+  return { href: `/blog/${CHATGPT_BLOG_SLUG}`, localized: postLocales.includes(locale) };
+}
+
+/**
+ * The FAQ entry this block adds to the page and to its FAQPage JSON-LD. A name
+ * that already ends in "Mail" or "Email" (AOL Mail, Gmail, Rackspace Email)
+ * takes `faqQMailName`, so English reads "Can ChatGPT read my AOL Mail?" and
+ * not "my AOL Mail mail". Locales where the doubling does not happen carry the
+ * same text in both keys.
+ */
+export function chatgptFaq(copy, providerName, listingUrl = CHATGPT_DIRECTORY_LISTING_URL) {
+  const question = /e?mail$/i.test(providerName) ? copy.faqQMailName : copy.faqQ;
+  return {
+    q: fill(question, providerName),
+    a: fill(listingUrl ? copy.directoryFaqA : copy.faqA, providerName),
+  };
+}

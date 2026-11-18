@@ -1,10 +1,16 @@
 import { Link } from '@/i18n/navigation';
+import { withReadingLang } from '@/i18n/reading-lang.mjs';
 import { Nav, Footer } from './Sections';
 import { MIcon } from '../MarketingPrimitives';
 import RichText from './RichText';
 import { CLIENT_LOGOS } from '../dashboard/clientLogos';
-import { MCP_URL, relatedClients } from '@/lib/clients/clients.mjs';
+import { MCP_URL, getClient, relatedClients } from '@/lib/clients/clients.mjs';
+import { orderClients, signupClientParam } from '@/lib/clients/preferred.mjs';
+import { withClientIntent } from '@/lib/connect/intent-carry.mjs';
 import { clientUi, fill } from '@/lib/clients/ui.mjs';
+import { docsPageInstallAction } from '@/lib/clients/install-links.mjs';
+import DocsInstallCta from './DocsInstallCta';
+import ConnectFolds, { ConnectFold } from './ConnectFolds';
 
 /**
  * A per-client setup page, rendered on the server.
@@ -15,8 +21,9 @@ import { clientUi, fill } from '@/lib/clients/ui.mjs';
  * every marketing page. Nav and Footer are the only things here that hydrate.
  *
  * Every class name used here already exists in styles/marketing.css, borrowed
- * from the provider landing pages and the docs page. This component adds no
- * CSS of its own.
+ * from the provider landing pages and the docs page. The hero buttons are the
+ * one client island (DocsInstallCta), for the click event, the copy button and
+ * the phone check.
  */
 
 /** The client's official logo glyph, white on a rounded tile in its brand colour. */
@@ -35,11 +42,11 @@ function ClientLogo({ color, logo, size = 44 }) {
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
-        margin: '0 auto 18px',
+        marginBottom: 18,
       }}
     >
       <svg width={glyph} height={glyph} viewBox={g.viewBox} fill="#fff" aria-hidden="true">
-        <path d={g.d} />
+        <path d={g.d} fillRule={g.fillRule} />
       </svg>
     </div>
   );
@@ -57,13 +64,33 @@ function CodeBlock({ label, code }) {
   );
 }
 
-export default function ClientSetupView({ locale, client, content }) {
+/**
+ * The sibling links, with the visitor's AI assistant (src/lib/clients/preferred.mjs)
+ * first: moved up when it is already in the list, otherwise put in front of a
+ * list one shorter. Never the page's own client, never a client without copy
+ * in this locale.
+ */
+export function relatedForVisitor(slug, locale, preferred) {
+  const related = relatedClients(slug, locale);
+  if (!preferred || preferred === slug) return related;
+  if (related.some((c) => c.slug === preferred)) return orderClients(related, preferred, (c) => c.slug);
+  const extra = getClient(preferred);
+  if (!extra || !extra.locales.includes(locale)) return related;
+  return [extra, ...related.slice(0, Math.max(0, related.length - 1))];
+}
+
+export default function ClientSetupView({ locale, client, content, preferred = null }) {
   const ui = clientUi(locale).page;
-  const related = relatedClients(client.slug, locale);
+  const related = relatedForVisitor(client.slug, locale, preferred);
+  // The signup buttons name this page's client, so onboarding starts on it.
+  const signupHref = withClientIntent(withReadingLang('/signup', locale), signupClientParam(client.slug));
   const name = client.shortName ?? client.name;
   const isTerminal = client.configFile === 'terminal';
   const configLabel = isTerminal ? ui.config.terminal : (client.configFile ?? ui.config.json);
   const config = client.config ? client.config(MCP_URL) : null;
+  const found = docsPageInstallAction(client.slug, { locale, mcpUrl: MCP_URL });
+  // Cowork needs a paid Claude plan, so the Claude Free note does not apply there.
+  const install = found && client.slug === 'cowork' ? { ...found, note: undefined } : found;
 
   return (
     <div>
@@ -77,17 +104,20 @@ export default function ClientSetupView({ locale, client, content }) {
             {content.hero.titleLine1}<br />{content.hero.titleLine2}
           </h1>
           <p className="pricing-page-lead">{content.hero.lead}</p>
-          {/*
-            The direct answer to the query, quotable on its own. The provider
-            pages ranked and returned no clicks until they carried one of
-            these; there is no reason to relearn that here.
-          */}
-          {content.hero.answer && <p className="pricing-page-answer">{content.hero.answer}</p>}
-          <div className="hero-cta" style={{ justifyContent: 'center', marginTop: 24 }}>
-            <a className="btn btn-primary btn-lg" href="/signup">{ui.ctaPrimary}</a>
-            <Link className="btn btn-secondary btn-lg" href="/docs">{ui.ctaSecondary}</Link>
-          </div>
-          <div className="hero-meta" style={{ justifyContent: 'center' }}>
+          {install ? (
+            <DocsInstallCta
+              action={install}
+              clientName={install.client === 'claude' ? 'Claude' : name}
+              signupHref={signupHref}
+              labels={{ ctaPrimary: ui.ctaPrimary, ctaSecondary: ui.ctaSecondary, ...ui.install }}
+            />
+          ) : (
+            <div className="hero-cta" style={{ marginTop: 24 }}>
+              <a className="btn btn-primary btn-lg" href={signupHref}>{ui.ctaPrimary}</a>
+              <Link className="btn btn-secondary btn-lg" href="/docs">{ui.ctaSecondary}</Link>
+            </div>
+          )}
+          <div className="hero-meta">
             {['meta0', 'meta1', 'meta2'].map((k) => content.hero[k] && (
               <span className="item" key={k}>
                 <MIcon name="check" size={14} color="var(--mint-600)" /> {content.hero[k]}
@@ -97,35 +127,25 @@ export default function ClientSetupView({ locale, client, content }) {
         </div>
       </section>
 
-      <section className="section" style={{ paddingTop: 56, paddingBottom: 0 }}>
-        <div className="container">
-          <div className="connect-callout">
-            <MIcon name="lock" size={20} color="var(--cobalt-600)" />
-            <div>
-              <h2 style={{ margin: '0 0 6px', fontSize: 16 }}>{content.method.title}</h2>
-              <p style={{ margin: 0, color: 'var(--fg-2)', fontSize: 14, lineHeight: 1.6 }}>
-                <RichText>{content.method.body}</RichText>
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/*
         The endpoint, the transport and which of the two auth paths this client
         takes. Whether a client does OAuth or wants a bearer key is the single
         fact that decides whether someone's setup completes, and it is the fact
-        a generic "paste the URL" page leaves out.
+        a generic "paste the URL" page leaves out. Under the table sits the
+        direct answer to the query (hero.answer), quotable on its own: the
+        provider pages ranked and returned no clicks until they carried one.
+        The auth detail folds under that, and the optional worked example
+        ("cursor gmail mcp") closes the section.
       */}
-      <section className="section" style={{ paddingTop: 40, paddingBottom: 0 }}>
+      <section className="section connect-intro">
         <div className="container">
           <h2 className="providers-h2">{ui.endpoint.title}</h2>
-          <p className="providers-sub">{fill(ui.endpoint.sub, { client: client.name })}</p>
+          <p className="providers-sub">{content.hero.answer ?? fill(ui.endpoint.sub, { client: client.name })}</p>
           <div className="comparison-wrap">
             <table className="comparison-tbl providers-conn-tbl">
               <thead>
                 <tr>
-                  <th className="feat-col" style={{ minWidth: 170 }}>{ui.endpoint.colField}</th>
+                  <th className="feat-col">{ui.endpoint.colField}</th>
                   <th>{ui.endpoint.colValue}</th>
                 </tr>
               </thead>
@@ -147,6 +167,17 @@ export default function ClientSetupView({ locale, client, content }) {
               </tbody>
             </table>
           </div>
+          <div className="connect-folds" style={{ marginTop: 16 }}>
+            <ConnectFold icon="lock" color="var(--cobalt-600)" title={content.method.title}>
+              <p><RichText>{content.method.body}</RichText></p>
+            </ConnectFold>
+          </div>
+          {content.answerSection?.title && (
+            <div className="connect-intro-block">
+              <h2 className="providers-h2">{content.answerSection.title}</h2>
+              <p className="providers-sub"><RichText>{content.answerSection.body}</RichText></p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -167,8 +198,15 @@ export default function ClientSetupView({ locale, client, content }) {
             ))}
           </div>
 
+          {/* The client's listing in its own directory (ChatGPT: Any Mailbox), when there is one. */}
+          {client.listingUrl && content.listingLink && (
+            <p className="how-guide-link">
+              <a href={client.listingUrl} target="_blank" rel="noopener noreferrer">{content.listingLink}</a>
+            </p>
+          )}
+
           {config && (
-            <div style={{ maxWidth: 820, margin: '28px auto 0' }}>
+            <div style={{ maxWidth: 820, marginTop: 28 }}>
               <CodeBlock label={configLabel} code={config} />
             </div>
           )}
@@ -179,11 +217,44 @@ export default function ClientSetupView({ locale, client, content }) {
               <a href={client.guide} target="_blank" rel="noopener noreferrer">{client.guide}</a>
             </p>
           )}
+          {/* The blog walkthrough for this client, where one exists (clients.mjs `post`). */}
+          {client.post && (
+            <p className="how-guide-link">
+              {ui.postLink.intro}{' '}
+              <Link href={client.post.href}>{ui.postLink[client.post.key]}</Link>
+            </p>
+          )}
           <p className="how-guide-link">
             {ui.providers.intro} <Link href="/docs/providers">{ui.providers.label}</Link>
           </p>
         </div>
       </section>
+
+      {/*
+        A second way in, after the main one. On ChatGPT: the custom MCP server
+        on chatgpt.com, for anyone the Any Mailbox plugin does not reach.
+        Rendered only when the content carries `fallback`.
+      */}
+      {content.fallback?.steps?.length > 0 && (
+        <section className="section" id="fallback">
+          <div className="container">
+            <div className="section-head">
+              <div className="eye-label">{content.fallback.eyebrow}</div>
+              <h2>{content.fallback.title}</h2>
+              <p className="sub"><RichText>{content.fallback.sub}</RichText></p>
+            </div>
+            <div className="how-steps">
+              {content.fallback.steps.map((s, i) => (
+                <div className="step" key={i}>
+                  <span className="num">{String(i + 1).padStart(2, '0')}</span>
+                  <h3>{s.h}</h3>
+                  <p><RichText>{s.p}</RichText></p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/*
         The part only we can write: what goes wrong in this specific client.
@@ -196,27 +267,7 @@ export default function ClientSetupView({ locale, client, content }) {
               <div className="eye-label">{ui.gotchas.eyebrow}</div>
               <h2>{fill(ui.gotchas.title, { client: name })}</h2>
             </div>
-            <div className="connect-gotchas">
-              {content.gotchas.map((g, i) => (
-                <div className="connect-gotcha" key={i}>
-                  <MIcon name="alert-triangle" size={17} color="var(--amber-700)" />
-                  <div>
-                    <h3>{g.h}</h3>
-                    <p><RichText>{g.p}</RichText></p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {content.limits?.length > 0 && (
-              <div className="connect-limits">
-                <h3>{ui.limits.title}</h3>
-                <ul>
-                  {content.limits.map((l, i) => (
-                    <li key={i}><RichText>{l}</RichText></li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <ConnectFolds gotchas={content.gotchas} limitsTitle={ui.limits.title} limits={content.limits} />
           </div>
         </section>
       )}
@@ -267,14 +318,14 @@ export default function ClientSetupView({ locale, client, content }) {
         <div className="container">
           <h2>{content.ctaBand.title}</h2>
           <p className="sub">{content.ctaBand.sub}</p>
-          <div className="hero-cta" style={{ justifyContent: 'center' }}>
-            <a className="btn btn-primary btn-lg" href="/signup">{ui.ctaPrimary}</a>
+          <div className="hero-cta">
+            <a className="btn btn-primary btn-lg" href={signupHref}>{ui.ctaPrimary}</a>
             <Link className="btn btn-secondary btn-lg" href="/docs">{ui.ctaSecondary}</Link>
           </div>
         </div>
       </section>
 
-      <Footer />
+      <Footer locales={client.locales} />
     </div>
   );
 }

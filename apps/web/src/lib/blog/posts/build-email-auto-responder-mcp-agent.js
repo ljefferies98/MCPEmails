@@ -3,23 +3,23 @@ const post = {
   title: 'Building an Email Auto-Responder With an MCP-Connected Agent',
   description: 'Build an email auto-responder with an MCP-connected AI agent: poll for unread mail, draft, and reply safely with scopes, rate limits, and guardrails.',
   cover: '/blog/cover-build-email-auto-responder-mcp-agent.svg',
-  coverAlt: 'Building an email auto-responder with an MCP-connected agent — MCPEmails',
+  coverAlt: 'Building an email auto-responder with an MCP-connected agent (MCPEmails)',
   authorId: 'asgeir',
   publishedAt: "2026-05-03T09:00:00.000Z",
   updatedAt: "2026-05-03T09:00:00.000Z",
   tags: ['Workflows', 'Tutorial', 'MCP', 'AI agents'],
   featured: false,
-  content: `An email auto-responder built on MCP Emails is a loop, not a webhook. There are no server-initiated events, so your agent **polls** for unread mail on a schedule with \`email_read\` (action \`list\`), reads each message with \`email_read\` (action \`read\`), drafts a reply, and calls \`email_compose\` (action \`reply\`). This post walks the full build: the polling loop, the scopes you need, how to survive rate limits, and the guardrails that keep an agent from blasting your contacts with hallucinated replies.
+  content: `An email auto-responder built on MCPEmails is a loop. Your agent **polls** for unread mail on a schedule with \`email_read\` (action \`list\`), or is woken by a new-mail webhook on Pro and Business, reads each message with \`email_read\` (action \`read\`), drafts a reply, and calls \`email_compose\` (action \`reply\`). This post walks the full build: the polling loop, the scopes you need, how to survive rate limits, and the guardrails that keep an agent from blasting your contacts with hallucinated replies.
 
-This is the advanced end of the [give your AI agent email access](/blog/how-to-give-your-ai-agent-email-access) story. If you just want triage and morning summaries without sending anything, read [AI agent inbox triage and summarize](/blog/ai-agent-triage-summarize-inbox) first — it's the safer place to start. Come back here when you actually want the agent to hit send.
+This is the advanced end of the [give your AI agent email access](/blog/how-to-give-your-ai-agent-email-access) story. If you just want triage and morning summaries without sending anything, read [AI agent inbox triage and summarize](/blog/ai-agent-triage-summarize-inbox) first; it's the safer place to start. Come back here when you actually want the agent to hit send.
 
-## The honest part: there is no webhook
+## Poll, or let a webhook wake you
 
-Most "auto-responder" tutorials assume a push event fires the moment mail lands. MCP Emails doesn't work that way, and neither does any MCP server I know of. MCP is a request/response tool protocol. The server answers when your agent asks; it never calls you.
+Most "auto-responder" tutorials assume a push event fires the moment mail lands. MCP itself does not work that way: it is a request/response tool protocol, and the server answers when your agent asks. So the baseline auto-responder is a scheduler plus a poll. You run a tick every N seconds or minutes, ask for unread messages, and process whatever's new. That's it. It's predictable, and it means *you* control the cadence and the blast radius.
 
-So a real auto-responder is a scheduler plus a poll. You run a tick every N seconds or minutes, ask for unread messages, and process whatever's new. That's it. It's less elegant than a webhook, but it's predictable, and it means *you* control the cadence and the blast radius.
+If you want the push, Pro and Business workspaces can add a webhook under **API Keys** in the dashboard. MCPEmails sends a signed POST to your URL when new mail arrives in an inbox, with the message IDs, and your loop opens them with \`email_read\`. Each webhook has a test button and a delivery log. Everything below still applies: the webhook only replaces the timer, not the reading, drafting and guardrails.
 
-Pick a poll interval that matches your tolerance for latency against your rate budget. Every 60 seconds is fine for support-style replies. Every 5 minutes is plenty for most inboxes and barely touches your limits. Don't poll every second — you'll burn quota for no reason and the inbox rarely changes that fast.
+Pick a poll interval that matches your tolerance for latency against your rate budget. Every 60 seconds is fine for support-style replies. Every 5 minutes is plenty for most inboxes and barely touches your limits. Don't poll every second: you'll burn quota for no reason and the inbox rarely changes that fast.
 
 ## What you need: an API key with send scope
 
@@ -27,13 +27,13 @@ An auto-responder almost always runs as a script or a cron job, not inside a cha
 
 In the dashboard, go to **API Keys**, create a key, and grant it the scopes you actually need:
 
-- \`read:email\` — to poll, list, and read messages with \`email_read\`.
-- \`send:email\` — to call \`email_compose\` (action \`reply\`).
+- \`read:email\`: to poll, list, and read messages with \`email_read\`.
+- \`send:email\`: to call \`email_compose\` (action \`reply\`).
 
-The key is shown once. Copy it. It looks like \`mcpe_live_...\` and you pass it on every request:
+The key is shown once. Copy it. It looks like \`mcpe_9f86d081...\` and you pass it on every request:
 
 \`\`\`
-Authorization: Bearer mcpe_live_YOUR_KEY
+Authorization: Bearer mcpe_9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 \`\`\`
 
 The MCP endpoint is a single URL:
@@ -86,7 +86,7 @@ while True:
     sleep(60)
 \`\`\`
 
-Three things to notice. First, the agent calls \`inbox_list\` to discover the \`inbox_id\` rather than pasting a UUID into the code — that's the discovery-first pattern, and it keeps the script working if you reconnect an inbox. Second, \`unread: true\` is what makes this a *new mail* responder instead of a re-reply-to-everything machine. Third, every message passes through guardrails before anything sends.
+Three things to notice. First, the agent calls \`inbox_list\` to discover the \`inbox_id\` rather than pasting a UUID into the code. That's the discovery-first pattern, and it keeps the script working if you reconnect an inbox. Second, \`unread: true\` is what makes this a *new mail* responder instead of a re-reply-to-everything machine. Third, every message passes through guardrails before anything sends.
 
 ### Marking messages handled
 
@@ -94,11 +94,11 @@ If you want a message to stop showing up as unread once you've replied, read it 
 
 ## Rate limits, and why you never blind-retry a send
 
-Every API key is capped at **100 requests per minute, 1,000 per hour, and 10,000 per day**, regardless of plan. Your workspace also has a burst ceiling by tier: **60 req/min on Free, 120 on Personal, 300 on Pro, 1,000 on Team** (see [pricing](/pricing)). A polite poll-and-reply loop lives well inside that, but a misbehaving one can trip it.
+Your workspace has a per-minute ceiling set by its plan (see [pricing](/pricing)), and every API key gets per-minute, hourly and daily windows sized to that plan, so one key can use the whole ceiling and several keys share it. A polite poll-and-reply loop lives well inside that, but a misbehaving one can trip it.
 
 When you hit a rate limit, the server returns a retryable error (code \`-32003\`) carrying \`data.retry_after\` in seconds. Honor it. Sleep for that long, then continue.
 
-Your plan's monthly action allowance is a different limit, and it is not retryable. When it runs out, the call comes back as a normal tool result with \`isError: true\` and a \`_meta["com.mcpemails/usage_limit"]\` block instead of a JSON-RPC error, with no \`retry_after\`. Retrying that just burns cycles until \`reset_at\` or an upgrade, so stop the loop and surface it.
+A plan usage limit is a different thing, and it is not retryable. When a workspace reaches one, the call comes back as a normal tool result with \`isError: true\` and a \`_meta["com.mcpemails/usage_limit"]\` block instead of a JSON-RPC error, with no \`retry_after\`. Retrying that just burns cycles until \`reset_at\` or an upgrade, so stop the loop and surface it.
 
 Here's the rule that matters most: **never blindly auto-retry an \`email_compose\` send or reply.** A send is not idempotent. If a send call times out or returns ambiguously, a naive retry can deliver the same reply twice. Retry *reads* freely; treat *sends* as one-shot and only retry on an explicit retryable error, with backoff and a hard cap.
 
@@ -128,11 +128,11 @@ An auto-responder that sends without supervision is one bad prompt away from ema
 
 ### Allowlist who gets auto-replies
 
-Don't reply to everyone. Start with a narrow allowlist — a support alias, a specific sender domain, messages matching a subject pattern. Everything else gets queued for a human or ignored. An allowlist is the single highest-leverage guardrail you can add, because it bounds the failure to a population you chose.
+Don't reply to everyone. Start with a narrow allowlist: a support alias, a specific sender domain, messages matching a subject pattern. Everything else gets queued for a human or ignored. An allowlist is the single highest-leverage guardrail you can add, because it bounds the failure to a population you chose.
 
 ### Keep a human in the loop, at least at first
 
-The safest version of this isn't an auto-responder at all — it's an auto-*drafter*. The agent reads, drafts, and stages the reply, but a person approves the send. MCP Emails supports drafts, so you can have the loop call \`draft\` (action \`create\`) instead of \`email_compose\`, then send the good ones yourself. Run in draft mode for a week. Read what it would have sent. Only then flip the ones you trust to auto-send.
+The safest version of this isn't an auto-responder at all; it's an auto-*drafter*. The agent reads, drafts, and stages the reply, but a person approves the send. MCPEmails supports drafts, so you can have the loop call \`draft\` (action \`create\`) instead of \`email_compose\`, then send the good ones yourself. Run in draft mode for a week. Read what it would have sent. Only then flip the ones you trust to auto-send.
 
 ### Stop loops and self-replies
 
@@ -152,12 +152,12 @@ If I were shipping this for a real inbox tomorrow, I'd start small and boring:
 1. API key with \`read:email\` and \`send:email\`, scoped to one inbox.
 2. Poll \`email_read(action: "list", unread: true)\` every two minutes.
 3. Allowlist exactly one support alias.
-4. Draft mode only — create drafts, send nothing automatically.
+4. Draft mode only: create drafts, send nothing automatically.
 5. After a week of reading the drafts, enable auto-send for the obvious cases and keep drafting the rest.
 
 That's a system you can actually trust, and it generalizes. The same loop with a different prompt becomes a triage bot, a lead router, or a notifier. For the broader menu of what an agent can do once it's wired in, see [7 things an AI agent can do with inbox access](/blog/7-things-ai-agent-can-do-with-inbox-access). If you're still deciding whether to hand an agent send access at all, [is it safe to give an AI agent email access](/blog/is-it-safe-to-give-ai-agent-email-access) is worth your time before you ship.
 
-Ready to build it? Create a scoped API key and read the tool reference in [the docs](/docs), or [start free](/signup): Free connects one inbox, Personal ($9/month) connects up to three, and Pro connects every mailbox you own.`,
+Ready to build it? Create a scoped API key and read the tool reference in [the docs](/docs), or [start free](/signup): Free connects one inbox, and the paid plans add more (see [pricing](/pricing)).`,
 };
 
 export default post;

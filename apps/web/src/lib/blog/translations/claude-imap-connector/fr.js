@@ -21,7 +21,7 @@ Claude n’a donc besoin ni d’une bibliothèque IMAP, ni d’une configuration
 
 ## Ce qu’il vous faut avant la configuration
 
-Rassemblez les informations suivantes depuis la page d’aide de votre fournisseur de messagerie ou auprès de votre administrateur :
+Rassemblez les informations suivantes depuis la page d’aide de votre fournisseur de messagerie ou auprès de votre administrateur. Vous pouvez aussi consulter les [réglages IMAP et SMTP vérifiés pour chaque fournisseur](/connect) :
 
 - **Adresse e-mail :** par exemple, \`you@example.com\`. C’est l’adresse affichée sur la boîte connectée.
 - **Nom d’utilisateur :** généralement l’adresse e-mail complète. Certains hébergeurs de domaines personnalisés fournissent un identifiant IMAP/SMTP différent.
@@ -33,7 +33,7 @@ Ne déduisez pas les noms de serveur du domaine si votre fournisseur publie ses 
 
 Utilisez un **mot de passe d’application** dès que le fournisseur le permet. Il est distinct du mot de passe principal du compte et peut être révoqué sans changer celui que vous utilisez pour vous connecter. Les fournisseurs exigent souvent l’authentification à deux facteurs avant de permettre sa création. Certains demandent également d’activer d’abord l’accès IMAP dans les réglages de messagerie.
 
-MCPEmails inclut des préréglages pour iCloud, Yahoo, Zoho et Yandex, ainsi qu’un flux dédié aux mots de passe d’application Fastmail. Ces choix renseignent automatiquement les hôtes et ports connus. Choisissez **Generic IMAP** pour un autre fournisseur ou votre propre serveur de messagerie, puis saisissez vous-même les valeurs.
+MCPEmails inclut des préréglages pour [iCloud](/connect/icloud), [Yahoo](/connect/yahoo), [Zoho](/connect/zoho) et [Yandex](/connect/yandex), ainsi qu’un flux dédié aux mots de passe d’application [Fastmail](/connect/fastmail). Ces choix renseignent automatiquement les hôtes et ports connus. Choisissez **Generic IMAP** pour un autre fournisseur ou votre propre serveur de messagerie, puis saisissez vous-même les valeurs. Consultez la [page de configuration IMAP générique](/connect/imap).
 
 ## Étape 1 : connecter la boîte IMAP/SMTP
 
@@ -80,7 +80,7 @@ Cette dernière capacité exige de la prudence. La suppression IMAP définitive 
 
 Un connecteur IMAP est très polyvalent, mais il ne rend pas tous les fournisseurs identiques.
 
-- **Pas de notification push des nouveaux messages :** MCPEmails fonctionne uniquement en requête/réponse. Il n’envoie pas de webhooks et ne déclenche pas Claude à l’arrivée d’un message. Un workflow automatisé doit interroger la boîte à intervalles réguliers, par exemple en listant les messages non lus.
+- **Pas de notification push des nouveaux messages dans Claude :** les outils MCP fonctionnent en requête/réponse, donc rien ne déclenche Claude à l’arrivée d’un message. Un workflow mené depuis une conversation interroge la boîte à intervalles réguliers, par exemple en listant les messages non lus. Votre propre code peut en revanche être réveillé par un webhook de nouveau message, que les espaces de travail Pro et Business ajoutent sous Clés API.
 - **La recherche varie selon le transport :** les filtres structurés d’expéditeur, d’objet, de texte et de date fonctionnent chez tous les fournisseurs, mais l’IMAP générique ne prend pas en charge le filtre de recherche \`has_attachment\`. La syntaxe de recherche propre à un fournisseur n’est pas portable.
 - **Les dossiers ne sont pas des libellés Gmail :** IMAP déplace un message entre des dossiers, tandis que Gmail peut associer plusieurs libellés à un même message. La différence pratique est expliquée dans [Libellés Gmail ou dossiers IMAP](/blog/gmail-labels-vs-imap-folders-ai-agents).
 - **SMTP est obligatoire pour envoyer :** une connexion IMAP fonctionnelle prouve que Claude peut accéder aux messages entrants, pas que l’hôte ou le port SMTP ni l’autorisation d’envoi sont corrects. Testez un message sortant sans risque avant de compter sur un workflow de réponse.

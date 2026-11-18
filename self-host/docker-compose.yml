@@ -1,5 +1,5 @@
 # ============================================================
-# MCP Emails, self-host stack
+# MCPEmails, self-host stack
 # ============================================================
 # Start-up order (each step waits for the previous one to be healthy):
 #
@@ -125,6 +125,8 @@ services:
       # deployment on its own address normally wants. See docs/smtp-relay.md.
       SMTP_RELAY_URL: ${SMTP_RELAY_URL:-}
       SMTP_RELAY_HOSTS: ${SMTP_RELAY_HOSTS:-}
+      MAIL_RELAY_ONLY_HOSTS: ${MAIL_RELAY_ONLY_HOSTS:-}
+      MAIL_RELAY_LOGINS: ${MAIL_RELAY_LOGINS:-}
     # Internal port. Route your public domain here (Coolify: the mcp-server
     # service, port 8000). Do not publish it without TLS in front.
     expose:
@@ -145,14 +147,17 @@ services:
         condition: service_healthy
     environment:
       DISPATCH_SECRET: ${DISPATCH_SECRET:?set DISPATCH_SECRET}
-    # Once a minute: flush due scheduled sends (/dispatch) and run due
-    # automations (/triage-dispatch). Replaces the hosted product's pg_cron +
-    # pg_net + Vault jobs. Non-2xx responses are logged; the loop keeps going.
+    # Once a minute: flush due scheduled sends (/dispatch), run due
+    # automations (/triage-dispatch) and due reminders (/reminders-dispatch);
+    # every fifth minute, morning briefs (/morning-brief-dispatch). Replaces the
+    # hosted product's pg_cron + pg_net + Vault jobs. Reminders and briefs do
+    # nothing until Pro features are on (migration 0024). Non-2xx responses are
+    # logged; the loop keeps going.
     # Single-line script: a folded (>) block would keep newlines on the
     # more-indented lines and split the command in the shell.
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'while true; do for p in dispatch triage-dispatch; do c=$$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "X-Dispatch-Secret: $${DISPATCH_SECRET}" "http://mcp-server:8000/$$p" 2>&1); case "$$c" in 2??) ;; *) echo "dispatcher: /$$p -> $$c";; esac; done; sleep 60; done'
+      - 'n=0; while true; do ps="dispatch triage-dispatch reminders-dispatch"; [ $$((n % 5)) -eq 0 ] && ps="$$ps morning-brief-dispatch"; for p in $$ps; do c=$$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H "X-Dispatch-Secret: $${DISPATCH_SECRET}" "http://mcp-server:8000/$$p" 2>&1); case "$$c" in 2??) ;; *) echo "dispatcher: /$$p -> $$c";; esac; done; n=$$((n + 1)); sleep 60; done'
 
   cli:
     build:

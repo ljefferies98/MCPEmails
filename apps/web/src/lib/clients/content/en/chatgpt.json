@@ -2,21 +2,23 @@
   "_sources": [
     "apps/web/components/dashboard/Pages.jsx (MCP_CLIENTS) + apps/web/messages/en/dashboard.json (clients.*)",
     "apps/web/app/.well-known/oauth-authorization-server/route.ts",
-    "https://help.openai.com/en/articles/12584461"
+    "https://help.openai.com/en/articles/12584461",
+    "https://help.openai.com/en/articles/20001256 (Plugins in ChatGPT: the plugin directory, Install plugin, Connect, @)",
+    "apps/web/app/authorize/page.js + apps/web/components/auth/AuthorizeApp.jsx + apps/web/messages/*/auth.json (authorize.*: the consent screen labels)"
   ],
   "meta": {
-    "title": "Connect Email to ChatGPT: MCP Connector Setup",
-    "description": "Add a real inbox to ChatGPT with developer mode and a custom MCP connector. OAuth, no API key, then read, search, send and schedule mail. One inbox free."
+    "title": "Connect Email to ChatGPT: Any Mailbox Plugin Setup",
+    "description": "Give ChatGPT a real inbox: install Any Mailbox from the ChatGPT plugin directory, sign in to MCPEmails, pick your mailboxes. OAuth, no API key. One inbox free."
   },
   "hero": {
     "eyebrow": "ChatGPT + email",
     "titleLine1": "Connect your inbox to ChatGPT",
-    "titleLine2": "as a custom MCP connector",
-    "lead": "Turn on developer mode, create a connector pointing at one URL, and ChatGPT can read, search, send, reply, forward, schedule and organize your real mail.",
+    "titleLine2": "with the Any Mailbox plugin",
+    "lead": "Install Any Mailbox, the MCPEmails plugin in the ChatGPT plugin directory, sign in, and ChatGPT can read, search, send, reply, forward, schedule and organize your real mail.",
     "meta0": "1 inbox free, forever",
     "meta1": "OAuth, no API key needed",
     "meta2": "Email fetched live, never stored",
-    "answer": "In ChatGPT, turn on developer mode under Settings, Apps and Connectors, Advanced settings. Create a connector, paste https://mcpemails.com/api/mcp as the connector URL, choose OAuth, and authorize with mcpemails. Developer mode works on chatgpt.com with Plus, Pro, Business, Enterprise and Edu, and in each chat you switch it on from the + menu."
+    "answer": "In ChatGPT, open Plugins, find Any Mailbox by MCPEmails in the plugin directory and click Install plugin, then Connect. Sign in to MCPEmails and choose which mailboxes ChatGPT can reach and how much access it gets. In a chat, type @ and pick Any Mailbox. Without the plugin, add a custom MCP server on chatgpt.com with the URL https://mcpemails.com/api/mcp and OAuth; OpenAI lists that for Business and Enterprise/Edu, with read-only access on Pro, on the web."
   },
   "method": {
     "title": "How ChatGPT connects: OAuth, no API key",
@@ -25,33 +27,53 @@
   "setup": [
     {
       "h": "Create a free account and connect a mailbox",
-      "p": "Sign up at mcpemails.com, no card required, then go to Dashboard, Inboxes, Connect Inbox. Outlook and Microsoft 365 connect with Sign in with Microsoft; Gmail, iCloud, Fastmail, Yahoo, Zoho and Yandex take an app-specific password, and Gmail can also use Google sign-in; anything else connects over plain IMAP and SMTP. The free plan holds one inbox, forever."
+      "p": "Sign up at mcpemails.com, no card needed, and connect your mailbox under Dashboard, Inboxes. Outlook and Microsoft 365 connect with Sign in with Microsoft; Gmail, iCloud, Fastmail, Yahoo, Zoho and Yandex take an app-specific password; anything else connects over IMAP and SMTP. One inbox is free, forever."
     },
     {
-      "h": "Turn on developer mode",
-      "p": "Open Settings, Apps and Connectors, Advanced settings, and turn on Developer mode."
+      "h": "Install Any Mailbox from the plugin directory",
+      "p": "Any Mailbox is the plugin MCPEmails publishes in the ChatGPT plugin directory. In ChatGPT, open <b>Plugins</b> in the sidebar, find Any Mailbox (or open its listing, linked below), click <b>Install plugin</b> and then <b>Connect</b>. You can browse the directory on every ChatGPT plan, on the web, desktop and mobile; whether a plugin can be installed depends on your plan, workspace, role and region."
     },
     {
-      "h": "Create the connector",
-      "p": "Back in Apps and Connectors, click Create. Enter a name and paste <code>https://mcpemails.com/api/mcp</code> as the Connector URL."
+      "h": "Sign in to MCPEmails",
+      "p": "ChatGPT sends you to MCPEmails. Sign in with the account that holds your mailboxes. If you are already signed in, you go straight to the consent screen."
     },
     {
-      "h": "Choose OAuth and authorize",
-      "p": "Pick OAuth, click Create, then authorize with mcpemails and approve the scopes you want the connector to hold."
-    },
-    {
-      "h": "Switch it on in each chat",
-      "p": "Open a new chat on chatgpt.com, click <b>+</b>, choose Developer mode and select the mcpemails app. ChatGPT only sees the tools in a chat where you have done this, so repeat it in every new conversation. The connector stays listed under Apps and Connectors in between."
+      "h": "Choose mailboxes and access, then use it with @",
+      "p": "The consent screen asks how much access ChatGPT gets: Read-only, Standard, Full access, or Custom to pick permissions one by one. Choose All inboxes or Specific inboxes, then click <b>Allow access</b>. Back in ChatGPT, type <b>@</b> in a chat and pick Any Mailbox, or just ask about your mail: ChatGPT uses installed plugins when they fit the request. When you start a ChatGPT prompt with \"Any Mailbox\", ChatGPT surfaces the plugin in your chat and uses relevant context to do the task. The first time you use it, ChatGPT asks you to connect, so you know what data may be shared."
     }
   ],
+  "listingLink": "Any Mailbox in the ChatGPT plugin directory",
+  "fallback": {
+    "eyebrow": "Without the plugin",
+    "title": "Add the same server as a custom MCP server",
+    "sub": "If Any Mailbox is not available in your ChatGPT account or workspace, add MCPEmails as a custom MCP server instead. It reaches the same mailboxes. OpenAI's help page lists custom MCP servers for Business and Enterprise/Edu on chatgpt.com, with read and fetch tools only on Pro; Go and Plus are not mentioned.",
+    "steps": [
+      {
+        "h": "Open Add custom MCP server",
+        "p": "On chatgpt.com, open <b>Plugins</b>, then <b>Personal</b>, click <b>Add</b> at the top right and choose <b>Add custom MCP server</b>. This works on the web only: the mobile app cannot add one."
+      },
+      {
+        "h": "Fill in the server",
+        "p": "Name it MCPEmails and paste <code>https://mcpemails.com/api/mcp</code> under <b>Connection</b>."
+      },
+      {
+        "h": "Choose OAuth and sign in",
+        "p": "Choose <b>OAuth</b>, tick <b>I understand and want to continue</b>, click <b>Create as a plugin</b>, then sign in with MCPEmails and approve the scopes you want ChatGPT to hold."
+      },
+      {
+        "h": "Mention it in the chat",
+        "p": "In a chat, type <b>@</b> and pick MCPEmails. The pick applies to that message, so @mention it again when a follow-up needs your email."
+      }
+    ]
+  },
   "gotchas": [
     {
-      "h": "Developer mode needs a paid plan, the web, and a switch in every chat",
-      "p": "Custom MCP connectors are available on chatgpt.com to Plus, Pro, Business, Enterprise and Edu accounts. Free and Go accounts cannot add one, and the mobile and desktop apps do not offer developer mode. On Business and Enterprise an admin may have to allow developer mode for the workspace first. The step people miss is the last one: the connector does nothing until you pick Developer mode and the mcpemails app from the <b>+</b> menu in the chat you are using."
+      "h": "Install once, then make sure the chat is using it",
+      "p": "Whether you can install a plugin depends on your ChatGPT plan, workspace, role and region. On Business and Enterprise, an admin may need to make the plugin available for the workspace first. The custom MCP server, the fallback, is web-only and needs a paid plan: OpenAI lists it for Business and Enterprise/Edu, with read and fetch tools only on Pro. In both cases the step people miss is in the chat: if ChatGPT answers without looking at your mail, type <b>@</b> and pick Any Mailbox (or MCPEmails, for the custom server) so that message uses it."
     },
     {
-      "h": "Pick OAuth, not no-authentication, when you create the connector",
-      "p": "The connector form asks how to authenticate. This server refuses anonymous calls: an unauthenticated request gets a 401 carrying an OAuth discovery pointer, which is what a compliant client follows to start the flow. Choosing no authentication produces a connector that fails on its first tool call rather than at setup, which is the confusing way round."
+      "h": "Pick OAuth, not no-authentication, when you create the custom server",
+      "p": "The custom-server form asks how to authenticate. This server refuses anonymous calls: an unauthenticated request gets a 401 carrying an OAuth discovery pointer, which is what a compliant client follows to start the flow. Choosing no authentication produces a connector that fails on its first tool call rather than at setup, which is the confusing way round. The plugin skips this question: it always signs in with OAuth."
     },
     {
       "h": "Read-only is a real option and often the right first one",
@@ -59,26 +81,30 @@
     }
   ],
   "limits": [
-    "Requests are rate limited to 100 per minute, 1,000 per hour and 10,000 per day per key, plus your plan ceiling on billable actions.",
+    "Requests are rate limited per key in per-minute, hourly and daily windows sized to your plan. A 429 carries Retry-After.",
     "The server is request and response only. There are no webhooks and no server-initiated events, so new mail never wakes your agent by itself. To react to arriving mail, poll on a schedule.",
     "Mail is fetched live from your provider on every call and never stored. Only the encrypted OAuth token or app password is kept, so a revoked token or a changed mailbox password ends access immediately."
   ],
   "faq": [
     {
       "q": "Can ChatGPT read and send my email?",
-      "a": "Through a custom MCP connector, yes. ChatGPT cannot reach a mailbox on its own; pointing a connector at mcpemails gives it tools for reading, searching, sending, replying, forwarding, organizing and scheduling mail, limited to the scopes you approve during setup."
+      "a": "Yes. Install Any Mailbox, the MCPEmails plugin in the ChatGPT plugin directory, or add MCPEmails as a custom MCP server. Either way ChatGPT gets tools for reading, searching, sending, replying, forwarding, organizing and scheduling mail, limited to the access you approve when you sign in."
     },
     {
-      "q": "Why can I not create a connector in my ChatGPT account?",
-      "a": "Developer mode needs ChatGPT Plus, Pro, Business, Enterprise or Edu, on the web. Free and Go accounts cannot add custom connectors, and the mobile and desktop apps do not show the option. On a Business or Enterprise workspace, ask an admin to allow developer mode. If the connector is created but ChatGPT ignores it, open the <b>+</b> menu in the chat and select Developer mode and the mcpemails app."
+      "q": "Is Any Mailbox the same as MCPEmails?",
+      "a": "Yes. Any Mailbox is the name MCPEmails has in the ChatGPT plugin directory, published by MCPEmails. It uses the same account, mailboxes and consent screen as a custom MCP server at https://mcpemails.com/api/mcp, so you need only one of the two."
+    },
+    {
+      "q": "Why can I not add a custom MCP server in ChatGPT?",
+      "a": "Custom MCP servers are added on chatgpt.com: the mobile app does not offer it. OpenAI's help page names Business and Enterprise/Edu for full support, where only an admin or owner can add and publish one, and Pro for read and fetch tools only; Go and Plus are not mentioned. The Any Mailbox plugin is the simpler route when your account can install it: there is no URL to paste. If MCPEmails is added but ChatGPT does not use it, type <b>@</b> in the chat and pick it; the pick applies to one message at a time."
     },
     {
       "q": "Do I need an API key for ChatGPT?",
-      "a": "No. Pick OAuth when creating the connector and ChatGPT registers itself and completes an authorization code plus PKCE flow. API keys are for clients that cannot do that, and for scripts."
+      "a": "No. The plugin signs in with OAuth, and so does a custom MCP server when you pick OAuth: ChatGPT registers itself and completes an authorization code plus PKCE flow. API keys are for clients that cannot do that, and for scripts."
     },
     {
       "q": "Which mailboxes can ChatGPT reach this way?",
-      "a": "Outlook.com and Microsoft 365 over Sign in with Microsoft, where a work account may need an IT admin to approve the app once; Gmail, iCloud, Fastmail, Yahoo, Zoho and Yandex with an app-specific password, with Google sign-in as a second option for Gmail; and any other mailbox that speaks IMAP and SMTP on the standard ports. The client sees them all through the same connection: your agent calls inbox_list first to discover every connected mailbox and its id, so there are no UUIDs to paste anywhere."
+      "a": "Outlook.com and Microsoft 365 over Sign in with Microsoft, where a work account may need an IT admin to approve the app once; Gmail, iCloud, Fastmail, Yahoo, Zoho and Yandex with an app-specific password; and any other mailbox that speaks IMAP and SMTP on the standard ports. The client sees them all through the same connection: your agent calls inbox_list first to discover every connected mailbox and its id, so there are no UUIDs to paste anywhere."
     },
     {
       "q": "Can ChatGPT send email without me seeing it?",
@@ -91,6 +117,6 @@
   ],
   "ctaBand": {
     "title": "Give ChatGPT a real inbox",
-    "sub": "One connector, every mailbox you have connected. One inbox free forever."
+    "sub": "One plugin, every mailbox you have connected. One inbox free forever."
   }
 }

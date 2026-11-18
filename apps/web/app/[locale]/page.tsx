@@ -1,11 +1,14 @@
 import type { Metadata } from 'next';
 import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { fetchStripePrices } from '@/lib/stripe/getPrices';
+import { eurDisplayEnabled } from '@/lib/stripe/eur-launch';
 import { routing } from '@/i18n/routing';
+import { requireLocale } from '@/i18n/require-locale';
 import { metaAlternates, localePath, OG_LOCALE, OG_IMAGE, homeJsonLd } from '@/i18n/seo';
 import HomeClient from '../../components/marketing/HomeClient';
-import { HOMEPAGE_DEMO_VIDEO } from '@/lib/experiments/constants';
-import { getExperimentDecisionForRequest } from '@/lib/experiments/request';
+import { fillListingUrl } from '@/lib/connect/chatgpt.mjs';
+import { withBusinessSeatPrices } from '@/lib/stripe/business-seat-display';
+import { businessSeatPageCopy } from '@/lib/billing/business-seat-copy';
 
 export async function generateMetadata({
   params,
@@ -13,13 +16,17 @@ export async function generateMetadata({
   params: Promise<{ locale: string }>;
 }): Promise<Metadata> {
   const { locale } = await params;
+  requireLocale(locale);
   const t = await getTranslations({ locale, namespace: 'home.meta' });
 
   const title = t('title');
   const description = t('description');
 
   return {
-    title,
+    // Absolute on purpose: the homepage title text is frozen until 2026-11-01
+    // for an SEO test, so it keeps the old suffix while the layout template
+    // now says "MCPEmails". Switch back to plain `title` after the test.
+    title: { absolute: `${title} · mcpemails` },
     description,
     alternates: metaAlternates(locale, ''),
     openGraph: {
@@ -48,15 +55,12 @@ export default async function HomePage({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
+  requireLocale(locale);
   setRequestLocale(locale);
-  const stripePrices = await fetchStripePrices();
-
-  // The first real user of the experiments system. The decision is made once
-  // per request from the anonymous subject id the proxy attached; the page
-  // itself knows nothing about cookies or bucketing. While the experiment is
-  // a draft this is always the control, so the homepage is unchanged.
-  const demoVideo = await getExperimentDecisionForRequest(HOMEPAGE_DEMO_VIDEO.key);
-  const showDemoVideo = demoVideo.variantId === HOMEPAGE_DEMO_VIDEO.variants.video;
+  // Business per person while `business_seat_pricing` is on; untouched when
+  // it is off (src/lib/stripe/business-seat-display.ts).
+  const stripePrices = await withBusinessSeatPrices(await fetchStripePrices());
+  const businessSeat = businessSeatPageCopy(locale, stripePrices);
 
   const t = await getTranslations({ locale, namespace: 'home.meta' });
   // The visible FAQ (components/marketing/Sections.jsx, Faq) reads this same
@@ -66,7 +70,15 @@ export default async function HomePage({
   const jsonLd = homeJsonLd(locale, {
     name: t('title'),
     description: t('description'),
-    faq: Array.isArray(faqItems) ? faqItems : [],
+    // {listingUrl} in an answer is the Any Mailbox listing in the ChatGPT
+    // plugin directory; the visible FAQ renders it as a link, the markup as
+    // the URL itself.
+    faq: Array.isArray(faqItems)
+      ? faqItems.map((f: { q: string; a: string }) => ({ q: f.q, a: fillListingUrl(f.a) }))
+      : [],
+    businessPerPerson: businessSeat && stripePrices.pro?.monthlyCents
+      ? { monthlyCents: stripePrices.pro.monthlyCents }
+      : null,
   });
 
   return (
@@ -75,7 +87,9 @@ export default async function HomePage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <HomeClient stripePrices={stripePrices} showDemoVideo={showDemoVideo} />
+      {/* EUR on (env switch or the completed launch, eur-launch.ts) as read at
+          render; off renders exactly as before. */}
+      <HomeClient stripePrices={stripePrices} eurEnabled={await eurDisplayEnabled()} businessSeat={businessSeat} />
     </>
   );
 }

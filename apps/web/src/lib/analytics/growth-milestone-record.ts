@@ -42,6 +42,17 @@
  * the oldest row that survives. The real crossing is that day or earlier, never
  * later, which is the same direction the cash ladder already errs in.
  *
+ * EXTENDED 2026-10-15 with the eight rungs crossed since, the money ones read
+ * from live Stripe rather than rebuilt: the CLI's live key now reads, and the
+ * Personal reprice and in-place upgrades made list-price reconstruction from
+ * `user_billing` wrong. The working is in the same note.
+ *
+ * EXTENDED 2026-10-27 with the five rungs crossed since, the last batch dated
+ * by hand. From then on a rung nothing else can date is written to the
+ * `growth_milestone_unlocks` table the first time the board sees it unlocked
+ * (`growth-milestone-store.ts`), so the undated pile no longer fills up while
+ * waiting for someone to rerun these queries.
+ *
  * PURE DATA, NO I/O. Imported by `growth-achievements.ts` and by its test.
  */
 
@@ -78,6 +89,18 @@ export const MILESTONE_UNLOCK_RECORD: MilestoneUnlockRecord = Object.freeze({
     day: '2026-09-07',
     note: 'user_billing: the 10th external subscription still live',
   },
+  'paying-25': {
+    day: '2026-09-24',
+    note: 'Stripe: the 25th live paying subscription, 01:27 UTC',
+  },
+  'paying-50': {
+    day: '2026-10-10',
+    note: 'Stripe: the 50th live paying subscription, 15:54 UTC',
+  },
+  'paying-100': {
+    day: '2026-10-21',
+    note: 'Stripe subscriptions and invoices: the 100th live paying subscription, 07:06 UTC',
+  },
   'mrr-1000': {
     day: '2026-08-31',
     note: 'user_billing at list price: the 3rd subscription took MRR to $14',
@@ -94,6 +117,18 @@ export const MILESTONE_UNLOCK_RECORD: MilestoneUnlockRecord = Object.freeze({
     day: '2026-09-14',
     note: 'user_billing at list price: five sales that day took MRR to $134',
   },
+  'mrr-25000': {
+    day: '2026-09-29',
+    note: 'Stripe subscriptions and invoices: MRR reached $257 at 23:50 UTC',
+  },
+  'mrr-50000': {
+    day: '2026-10-11',
+    note: 'Stripe subscriptions and invoices: MRR reached $507.20 at 16:55 UTC',
+  },
+  'mrr-100000': {
+    day: '2026-10-22',
+    note: 'Stripe subscriptions and invoices: MRR reached $1,002.18 at 05:41 UTC',
+  },
 
   /* ------------------------------------------------------------ people */
 
@@ -109,6 +144,14 @@ export const MILESTONE_UNLOCK_RECORD: MilestoneUnlockRecord = Object.freeze({
     day: '2026-09-11',
     note: 'workspaces.onboarding_value_activated_at: the 250th first activation',
   },
+  'activated-500': {
+    day: '2026-10-01',
+    note: 'workspaces.onboarding_value_activated_at: the 500th first activation',
+  },
+  'activated-1000': {
+    day: '2026-10-25',
+    note: 'workspaces.onboarding_value_activated_at: the 1,000th first activation',
+  },
   'active-7d-50': {
     day: '2026-08-17',
     note: 'activity_log: first 7 day window with 50 workspaces served',
@@ -116,6 +159,14 @@ export const MILESTONE_UNLOCK_RECORD: MilestoneUnlockRecord = Object.freeze({
   'active-7d-100': {
     day: '2026-08-31',
     note: 'activity_log: first 7 day window with 100 workspaces served',
+  },
+  'active-7d-250': {
+    day: '2026-09-23',
+    note: 'activity_log: first 7 day window with 250 workspaces served',
+  },
+  'active-7d-500': {
+    day: '2026-10-14',
+    note: 'activity_log: first 7 day window with 500 workspaces served',
   },
   'signup-streak-7': {
     day: '2026-06-28',
@@ -129,6 +180,10 @@ export const MILESTONE_UNLOCK_RECORD: MilestoneUnlockRecord = Object.freeze({
     day: '2026-08-31',
     note: 'users.created_at: the day the run of daily signups first reached 30',
   },
+  'signup-streak-60': {
+    day: '2026-09-30',
+    note: 'users.created_at: the day the run of daily signups first reached 60',
+  },
 
   /* ------------------------------------------------------------- usage */
 
@@ -140,12 +195,20 @@ export const MILESTONE_UNLOCK_RECORD: MilestoneUnlockRecord = Object.freeze({
     day: '2026-09-07',
     note: 'users.created_at: the first UTC day with 25 or more signups',
   },
+  'record-signup-day-50': {
+    day: '2026-10-15',
+    note: 'users.created_at: the first UTC day with 50 or more signups',
+  },
 
   /* ------------------------------------------------------- reliability */
 
   'success-streak-30': {
     day: '2026-07-18',
     note: 'activity_log, earliest provable: the log keeps only 90 days',
+  },
+  'success-streak-90': {
+    day: '2026-10-27',
+    note: 'activity_log: the unbroken run that began 2026-07-30 reached 90 days',
   },
 });
 

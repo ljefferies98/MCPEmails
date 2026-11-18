@@ -52,11 +52,35 @@ export const RELEASE_WAVES = {
   // moved to the consumer and business categories; the wave is unchanged.
   8: '2026-09-15',
   9: '2026-09-15',
-  // HELD, not scheduled. These seven need a human spot-check first: SFR and
-  // StartMail are sourced more weakly than the rest of the set, and Rogers has
-  // app-password availability contradicted between two live vendor pages. Set
-  // a date here once someone has read them.
-  10: null,
+  // Brazilian, Japanese and DACH hosts researched and probed on 2026-11-04:
+  // Yahoo! JAPAN, OCN, BIGLOBE, @nifty, Locaweb, KingHost, Vodafone and A1.
+  // Numbered below the held cohort because a dated wave may not follow a held
+  // one; the held set was wave 10 until this cohort was added.
+  10: '2026-11-04',
+  // Italian, Czech and Polish hosts researched on official help pages and
+  // probed on 2026-11-10: Aruba, Libero and Virgilio, TIM, Tiscali, PEC
+  // (Aruba PEC, Legalmail, Poste), Centrum/Atlas/Volný and Gazeta.pl, plus
+  // WP.pl, checked against pomoc.wp.pl and moved out of the held cohort.
+  11: '2026-11-10',
+  // The review cohort, read against current vendor pages and re-probed on
+  // 2026-11-11: Optimum (username rule and SMTP corrected from faq.optimum.net),
+  // Rogers (both vendor pages still contradict each other on app passwords and
+  // the page says so), SFR (rewritten from assistance.sfr.fr: one SFR password,
+  // not two), StartMail (sourced from support.startmail.com) and Spark Xtra
+  // (server capabilities changed since August). Frontier stays held, below.
+  12: '2026-11-11',
+  // Hosting platforms our users connect that had no page: cyber_Folks,
+  // TransIP, Combell, Hostpoint, Websupport, REG.RU, 20i StackMail and Arsys,
+  // researched on the vendors' own help pages and probed on 2026-11-11.
+  13: '2026-11-11',
+  // HELD, not scheduled. Frontier: frontier.com answers our network with a
+  // 403 "Verizon Information Security Policy" page, so the two vendor sources
+  // the page rests on could not be re-read, and smtp.frontier.com completes a
+  // TLS handshake on 465 but never sends a greeting. Set a date once someone
+  // has read the Frontier pages from a network they admit. (This was wave 12
+  // until the two 2026-11-11 cohorts were added: a dated wave may not follow a
+  // held one.)
+  14: null,
 };
 
 /**
@@ -145,11 +169,19 @@ export const PINNED_RELATED = {
  * outbound links at all, and it is the highest-priority page here. Internal
  * links are the whole reason this set is crawlable, so running out of siblings
  * has to degrade into a wider net rather than into nothing.
+ *
+ * With `locale`, only providers whose page exists in that locale are linked.
+ * A frozen locale (zh, see src/i18n/locale-policy.mjs) may lack newer
+ * providers, and the page links its siblings with the locale prefix, so an
+ * unfiltered list would put a 404 on a localized page. Without `locale` the
+ * list is not filtered.
  */
-export function relatedProviders(slug, limit = 6, now = new Date()) {
+export function relatedProviders(slug, limit = 6, now = new Date(), locale = null) {
   const self = getProvider(slug);
   if (!self) return [];
-  const pool = releasedProviders(now).filter((p) => p.slug !== slug);
+  const pool = releasedProviders(now).filter(
+    (p) => p.slug !== slug && (!locale || p.locales.includes(locale)),
+  );
 
   // Rotate by slug so each page in a category seeds a different slice.
   const rotate = (list) => {

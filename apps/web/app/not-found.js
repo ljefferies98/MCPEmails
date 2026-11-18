@@ -1,5 +1,7 @@
+import { SupportHelpLink } from '../components/support/SupportHelpLink';
+
 export const metadata = {
-  title: '404 – Page not found · mcpemails',
+  title: '404 – Page not found',
   description: 'The page you are looking for does not exist.',
 };
 
@@ -38,7 +40,7 @@ export default function NotFound() {
 
         {/* Brand */}
         <div className="auth-brand">
-          <img className="logo-light" src="/logo-wordmark.svg" width="280" height="48" alt="mcpemails" /><img className="logo-dark" src="/logo-wordmark-dark.svg" width="280" height="48" alt="mcpemails" />
+          <img className="logo-light" src="/logo-wordmark.svg" width="280" height="48" alt="MCPEmails" /><img className="logo-dark" src="/logo-wordmark-dark.svg" width="280" height="48" alt="MCPEmails" />
         </div>
 
         {/* Card */}
@@ -141,6 +143,9 @@ export default function NotFound() {
           >
             Back to homepage
           </a>
+          <SupportHelpLink
+            style={{ display: 'block', marginTop: 14, textAlign: 'center', color: 'var(--fg-3)', fontFamily: 'var(--font-sans)', fontSize: 13 }}
+          />
         </div>
       </div>
     </div>

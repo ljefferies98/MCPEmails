@@ -1,6 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { BRAKE_ALERT_REPEAT_ERROR, type BrakeAlertDb, isRepeatBrakeAlert } from "./brake-alert.ts";
 import { type CheckoutFeedbackContext, renderCheckoutFeedbackEmail } from "./checkout-feedback.ts";
+import { renderEmailSendFailedEmail } from "./email-send-failed.ts";
+import { renderEurLaunchEmail } from "./eur-launch.ts";
 
 const PUBLIC_MCP_ENDPOINT = Deno.env.get("SYSTEM_NOTIFY_MCP_ENDPOINT") ?? "https://mcpemails.com/api/mcp";
 // The connected/authenticated inbox we send FROM (must be a real inbox_list entry with credentials).
@@ -8,10 +11,37 @@ const PUBLIC_MCP_ENDPOINT = Deno.env.get("SYSTEM_NOTIFY_MCP_ENDPOINT") ?? "https
 // connection until 2026-09-01 and is now Gmail over IMAP with an app password;
 // the send path is whatever that inbox is connected as on the day, which is
 // exactly the assumption resolveThreadAnchor exists to stop this file making.
-const SEND_FROM_INBOX_EMAIL = "bjellanda@gmail.com";
-// Where the notification is delivered TO.
-const NOTIFY_TO_EMAIL = "bjellanda@gmail.com";
+// ALERT_SENDER overrides it (staging points it at a test inbox).
+const SEND_FROM_INBOX_EMAIL = Deno.env.get("ALERT_SENDER")?.trim() || "bjellanda@gmail.com";
+// Where the notification is delivered TO. ALERT_RECIPIENT overrides it.
+const NOTIFY_TO_EMAIL = Deno.env.get("ALERT_RECIPIENT")?.trim() || "bjellanda@gmail.com";
+
+// Signup emails are disabled indefinitely at the owner's request. Remove the
+// entry to turn them back on.
+const MUTED_EVENT_TYPES = new Set(["user.signup"]);
 const REQUEST_TIMEOUT_MS = 30_000;
+
+// Events that move a number on /admin/growth and the kiosk. Their reads are
+// cached for ten minutes on the web app; this asks it to drop them now.
+const GROWTH_EVENT_TYPES = new Set(["user.signup"]);
+const GROWTH_EXPIRE_URL = Deno.env.get("GROWTH_EXPIRE_URL") ?? "https://mcpemails.com/api/internal/growth-expire";
+
+/** Best effort and bounded: a slow or failed expiry must never hold up or fail the event. */
+async function expireGrowthCache(eventType: string): Promise<void> {
+  const secret = Deno.env.get("DISPATCH_SECRET");
+  if (!secret) return;
+  try {
+    const response = await fetch(GROWTH_EXPIRE_URL, {
+      method: "POST",
+      headers: { "x-dispatch-secret": secret, "x-growth-reason": eventType },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) console.warn("growth cache expiry refused", response.status);
+    await response.body?.cancel();
+  } catch (error) {
+    console.warn("growth cache expiry failed", error instanceof Error ? error.message : error);
+  }
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type EventBody = { event_id?: unknown; event_type?: unknown; payload?: unknown };
@@ -106,81 +136,9 @@ async function fetchGrowthStats(supabase: SupabaseClient): Promise<GrowthStats> 
   return { totalUsers, last24h, last7d, recentWorkspaces, recentWorkspacesConnected };
 }
 
-// Everything the automation.auto_disabled email needs beyond the event payload
-// itself. Same guarded style as fetchGrowthStats: any single lookup may come
-// back null, and the email renders "unknown" rather than failing to send. The
-// owner's email address is read HERE, at send time, and deliberately never
-// written into system_events.payload, which the migration reserves for
-// structured metadata only.
-type AutomationContext = {
-  ownerEmail: string | null;
-  workspaceName: string | null;
-  rulesEnabled: number | null;
-  rulesAutoDisabled: number | null;
-};
-
-async function fetchAutomationContext(
-  supabase: SupabaseClient,
-  workspaceId: string,
-): Promise<AutomationContext> {
-  const out: AutomationContext = {
-    ownerEmail: null,
-    workspaceName: null,
-    rulesEnabled: null,
-    rulesAutoDisabled: null,
-  };
-  if (!UUID_RE.test(workspaceId)) return out;
-
-  try {
-    const { data } = await supabase
-      .from("workspaces")
-      .select("display_name, owner_id")
-      .eq("id", workspaceId)
-      .maybeSingle();
-    if (data) {
-      out.workspaceName = typeof data.display_name === "string" ? data.display_name : null;
-      if (typeof data.owner_id === "string") {
-        const { data: owner } = await supabase
-          .from("users")
-          .select("email")
-          .eq("id", data.owner_id)
-          .maybeSingle();
-        if (owner && typeof owner.email === "string") out.ownerEmail = owner.email;
-      }
-    }
-  } catch { /* best-effort: the alert is worth sending without it */ }
-
-  // Exact head counts, never data.length: a row-returning select silently
-  // truncates at 1000, so counting fetched rows would understate a workspace
-  // with a lot of rules. Same trap fetchGrowthStats documents.
-  const count = async (query: PromiseLike<{ count: number | null; error: unknown }>) => {
-    try {
-      const { count: value, error } = await query;
-      return error ? null : value;
-    } catch {
-      return null;
-    }
-  };
-  const [enabled, autoDisabled] = await Promise.all([
-    count(
-      supabase.from("triage_rules").select("*", { count: "exact", head: true })
-        .eq("workspace_id", workspaceId).eq("enabled", true).is("deleted_at", null),
-    ),
-    count(
-      supabase.from("triage_rules").select("*", { count: "exact", head: true })
-        .eq("workspace_id", workspaceId).eq("enabled", false).is("deleted_at", null)
-        .not("disabled_reason", "is", null),
-    ),
-  ]);
-  out.rulesEnabled = enabled;
-  out.rulesAutoDisabled = autoDisabled;
-  return out;
-}
-
 // Everything the checkout.feedback email says. The event payload carries ids
 // and the fixed reason only; what the user typed and who they are live in their
-// own tables and are read HERE, at send time, the same position
-// fetchAutomationContext takes on the owner's address. Every lookup is guarded
+// own tables and are read HERE, at send time, never in the payload. Every lookup is guarded
 // on its own, so one failed query costs one "unknown" line, not the email.
 async function fetchCheckoutFeedbackContext(
   supabase: SupabaseClient,
@@ -332,28 +290,6 @@ async function fetchCheckoutFeedbackContext(
   return out;
 }
 
-// What each automation failure code means for the person who has to act on it.
-// Kept short and specific: the point of this alert is that somebody reads it
-// once and knows whether to reconnect a client, fix a mailbox, or look at us.
-const AUTOMATION_ERROR_GUIDANCE: Record<string, string> = {
-  api_key_expired:
-    "The OAuth connection behind the rule is gone (disconnected, or the refresh chain aged out). "
-    + "The user has to reconnect MCP Emails in their MCP client and switch the rule back on. "
-    + "NOTE: a merely stale access token no longer produces this - the runner follows key rotation.",
-  api_key_unavailable: "The key was revoked or deleted. The rule cannot run until it is pointed at a live key.",
-  scope_denied: "The key no longer holds the scope the rule's action needs.",
-  inbox_not_permitted: "The key's inbox allowlist no longer includes the rule's inbox.",
-  inbox_unavailable: "The inbox the rule targets is gone.",
-  search_failed: "The mailbox search failed repeatedly. Likely a provider or credential problem on that inbox.",
-  folder_unresolved: "The destination folder could not be resolved on the provider.",
-  destination_folder_not_found:
-    "The destination folder is missing from the mailbox: every move the rule attempted was refused "
-    + "and nothing was moved. The user has to create the folder (or point the rule at one that exists) "
-    + "and switch the rule back on.",
-  invalid_filter: "The stored filter no longer validates. This is ours, not the user's.",
-  invalid_action: "The stored action no longer validates. This is ours, not the user's.",
-};
-
 // New event types just need a new entry here -- an event_type with no matching entry is a no-op, not a
 // transport failure (see the unmatched-template branch below). buildTemplate
 // is async and receives the service-role supabase client so entries can pull
@@ -423,46 +359,44 @@ async function buildTemplate(eventType: string, payload: Record<string, unknown>
     return { subject, body };
   }
 
-  if (eventType === "automation.auto_disabled") {
-    // An automation switched itself off after repeated failures. This is the
-    // alert that did not exist when one customer's rules failed 134 times over
-    // four days with nobody told, so it is written to be read once and acted on.
-    const ruleId = typeof payload.rule_id === "string" ? payload.rule_id : "unknown";
-    const workspaceId = typeof payload.workspace_id === "string" ? payload.workspace_id : "";
-    const inboxId = typeof payload.inbox_id === "string" ? payload.inbox_id : "unknown";
-    const ruleName = typeof payload.rule_name === "string" && payload.rule_name ? payload.rule_name : "(unnamed)";
-    const errorCode = typeof payload.error_code === "string" ? payload.error_code : "unknown";
-    const failures = typeof payload.consecutive_failures === "number" ? payload.consecutive_failures : null;
-    const context = await fetchAutomationContext(supabase, workspaceId);
-
-    const who = context.ownerEmail ?? context.workspaceName ?? workspaceId ?? "unknown workspace";
-    const subject = `Automation switched itself off: ${who}`;
-    const body = [
-      `An automation stopped itself after ${failures === null ? "repeated" : failures} consecutive failed runs.`,
-      "",
-      "WHO",
-      `owner: ${context.ownerEmail ?? "unknown"}`,
-      `workspace: ${context.workspaceName ?? "unknown"} (${workspaceId || "unknown"})`,
-      "",
-      "WHAT STOPPED",
-      `rule: ${ruleName}`,
-      `rule_id: ${ruleId}`,
-      `inbox_id: ${inboxId}`,
-      `error_code: ${errorCode}`,
-      "",
-      "WHAT IT MEANS",
-      AUTOMATION_ERROR_GUIDANCE[errorCode] ?? "No specific guidance for this code. Read the rule's run log.",
-      "",
-      "REST OF THE WORKSPACE",
-      `automations still switched on: ${context.rulesEnabled === null ? "unknown" : context.rulesEnabled}`,
-      `automations already switched off by failures: ${context.rulesAutoDisabled === null ? "unknown" : context.rulesAutoDisabled}`,
-      "",
-      `disabled at: ${new Date().toISOString()}`,
-    ].join("\n");
-
-    return { subject, body };
+  // automation.auto_disabled deliberately has no template: the rule still
+  // records disabled_reason and the system_events row is still written, but
+  // the operator email was noise (one per rule, so a dead mailbox with 48
+  // rules sent 48 of them) and nobody acted on it.
+  if (eventType === "outbound.brake_tripped") {
+    // The operator reads these in Norway; a bare UTC stamp next to the mail
+    // client's local time read as "paused until right now".
+    const osloTime = (value: unknown) => {
+      const ms = typeof value === "string" ? Date.parse(value) : NaN;
+      if (!Number.isFinite(ms)) return "unknown";
+      const oslo = new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "Europe/Oslo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+      }).format(new Date(ms));
+      return `${oslo} Oslo (${new Date(ms).toISOString().slice(11, 16)} UTC)`;
+    };
+    // An outbound abuse brake in mcp-server (outbound-brakes.ts) just tripped
+    // for an inbox. Ids only: the payload never carries content or addresses.
+    const text = (value: unknown) => (typeof value === "string" && value.length > 0 ? value : "unknown");
+    const brake = text(payload.brake);
+    const what = brake === "fanout_hold"
+      ? "one message went to more than 25 recipients within an hour, so further sends from this inbox are held for approval in the dashboard"
+      : brake === "provider_refusal_pause"
+      ? "the mail provider refused 3 messages as spam or policy within an hour, so sends from this inbox are paused"
+      : `brake ${brake} tripped`;
+    return {
+      subject: `Send brake: ${brake}`,
+      body: [
+        `An outbound send brake tripped: ${what}.`,
+        "",
+        `workspace_id: ${text(payload.workspace_id)}`,
+        `inbox_id: ${text(payload.inbox_id)}`,
+        `until: ${osloTime(payload.until)}`,
+        "",
+        "To stop every send from the workspace, set workspaces.sends_frozen_at.",
+        "Further trips for this inbox in the next 24 hours are recorded in system_events but not emailed.",
+      ].join("\n"),
+    };
   }
-
   if (eventType === "checkout.feedback") {
     // Someone answered the "what held you back?" card after abandoning a
     // Stripe checkout. Wording lives in ./checkout-feedback.ts, which is pure
@@ -471,6 +405,33 @@ async function buildTemplate(eventType: string, payload: Record<string, unknown>
     const workspaceId = typeof payload.workspace_id === "string" ? payload.workspace_id : "";
     const reason = typeof payload.reason === "string" ? payload.reason : null;
     return renderCheckoutFeedbackEmail(await fetchCheckoutFeedbackContext(supabase, feedbackId, workspaceId, reason));
+  }
+  if (eventType === "gmail.oauth_cap_closed") {
+    // apps/web/src/lib/oauth/gmail-oauth-gate.ts: the unverified Google OAuth
+    // client is close to Google's 100-user lifetime cap, so the web app has
+    // stopped offering Gmail sign-in for NEW connections. Counts only.
+    const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? String(value) : "unknown");
+    return {
+      subject: `Gmail sign-in closed to new connections (${num(payload.used)}/${num(payload.cap)})`,
+      body: [
+        `Gmail OAuth grants counted: ${num(payload.used)} of ${num(payload.cap)} (${num(payload.remaining)} left, reserve ${num(payload.reserve)}).`,
+        "The dashboard no longer offers Google sign-in for new Gmail inboxes, and /auth/gmail refuses new connections. Reconnects of existing Gmail inboxes still work. App password stays the Gmail path.",
+        "",
+        "Our count is a floor. To use the real Cloud Console figure, insert it into admin_oauth_cap_snapshots (provider 'gmail').",
+        "",
+        "Board: https://mcpemails.com/admin/growth",
+      ].join("\n"),
+    };
+  }
+  if (eventType === "billing.eur_launch") {
+    // The EUR launch dispatcher on the web app: a failed preflight (once a
+    // day), a launch that stopped part way, the launch going live, or legacy
+    // swap failures. Wording comes from the dispatcher; see ./eur-launch.ts.
+    return renderEurLaunchEmail(payload);
+  }
+  if (eventType === "email.send_failed") {
+    // Resend refused a send from the web app; see ./email-send-failed.ts.
+    return renderEmailSendFailedEmail(payload);
   }
   return null;
 }
@@ -659,6 +620,27 @@ Deno.serve(async (request) => {
   const markProcessed = async (status: "sent" | "failed", error: string | null) => {
     await supabase.from("system_events").update({ status, error, processed_at: new Date().toISOString() }).eq("id", eventId);
   };
+
+  // Before the mute check: signup emails are muted, but the board still has
+  // to count the signup.
+  if (GROWTH_EVENT_TYPES.has(eventType)) await expireGrowthCache(eventType);
+
+  // Event types whose email is switched off. The system_events row is still
+  // written (growth analytics read it); only the notification is skipped.
+  if (MUTED_EVENT_TYPES.has(eventType)) {
+    await markProcessed("failed", "muted");
+    return json(200, { event_id: eventId, status: "muted" });
+  }
+
+  // One send-brake email per inbox and brake per 24 hours (brake-alert.ts).
+  // The event row stays: it is the record of every trip.
+  if (
+    eventType === "outbound.brake_tripped" &&
+    await isRepeatBrakeAlert(supabase as unknown as BrakeAlertDb, eventId, payload)
+  ) {
+    await markProcessed("failed", BRAKE_ALERT_REPEAT_ERROR);
+    return json(200, { event_id: eventId, status: "muted" });
+  }
 
   try {
     const template = await buildTemplate(eventType, payload, supabase);

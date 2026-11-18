@@ -157,3 +157,123 @@
 20261005100100_web_push_watch_functions.sql	skipped	hosted web client push notifications (client-api)
 20261005100200_schedule_inbox_watch_dispatch.sql	skipped	pg_cron/Vault job POSTing to the hosted client-api; web client is not part of self-host
 20261005113000_attribute_business_landing_pages.sql	skipped	marketing acquisition attribution (check already a documented parity exception)
+20261005120000_funnel_entry_point.sql	ported	0025: product_funnel_events.entry_point + check
+20261013050000_disk_io_relief.sql	skipped	index tuning for hosted traffic volume; no column, check or unique key the server depends on
+20261013120000_draft_lineage.sql	ported	0018: draft_lineage + draft_lineage_record()
+20261013180000_inboxes_signature_embed_images.sql	ported	0019: inboxes.signature_embed_images
+20261015100000_acquisition_device.sql	skipped	marketing acquisition attribution (column a documented parity exception)
+20261015180000_mail_relay_registry.sql	partial	0020: mail_relay_hosts/_stats, record_mail_relay_use(), learn_mail_relay_host(); growth_mail_relay_* reporting is hosted-only
+20261015200000_mail_relay_learning_gate.sql	ported	0020: mail_relay_candidates + final learn_mail_relay_host()
+20261015220000_draft_card_activity.sql	ported	0018: draft_card_activity
+20261016090000_support_tickets.sql	skipped	hosted help-center contact form
+20261016100000_mail_relay_learning_rescued_calls.sql	ported	0020: final learn_mail_relay_host()
+20261016120000_growth_signup_pace.sql	skipped	internal growth dashboard
+20261016130000_personal_action_ceiling_100k.sql	skipped	usage-cap enforcement (workspace_action_allowance is intentionally absent; USAGE_ENFORCEMENT_DISABLED=true)
+20261016160100_workspaces_server_owned_writes.sql	skipped	revokes browser-session (authenticated) writes; self-host grants tables only to service_role (migrate.sh) and has no end-user sessions
+20261016160200_inboxes_lock_user_writes_and_secret_columns.sql	skipped	revokes browser-session (authenticated) access; self-host grants tables only to service_role and has no end-user sessions
+20261016160300_api_keys_no_member_writes.sql	skipped	revokes browser-session (authenticated) writes; self-host grants tables only to service_role and has no end-user sessions
+20261016160400_scheduled_sends_writer_lockdown.sql	partial	0021: send_approvals.dispatch_scheduled_send_id (+ backfill) and scheduled_sends_enforce_integrity(); the authenticated grants and auth.uid() policy are hosted-only
+20261016160600_send_approval_revision.sql	ported	0021: send_approvals.revision + bump trigger
+20261016160700_revoke_truncate_references_trigger_from_api_roles.sql	skipped	revokes privileges from the hosted API roles; self-host never grants them to anon/authenticated
+20261017160000_free_grace_three_days.sql	skipped	hosted Free-plan trial length (usage caps are disabled on self-host)
+20261018120000_inbox_sender_aliases.sql	partial	0019: inbox_sender_aliases + workspace trigger; the authenticated column grants and my_workspace_ids() policy are hosted-only
+20261019120000_growth_signup_trend.sql	skipped	internal growth dashboard
+20261019130000_directory_listing_attribution.sql	skipped	marketing acquisition attribution
+20261019140000_sso_connections.sql	skipped	SAML SSO (users.sso_provider_id and the SSO-aware unique keys are documented parity exceptions)
+20261019140500_sso_user_signup_triggers.sql	skipped	SAML SSO sign-up on auth.users
+20261019150000_pro_inbox_cap_and_business.sql	skipped	hosted plan inbox caps and Business billing; usage_limit_events is intentionally absent (funnel stage check carried by 0025)
+20261019152000_sso_audit_events.sql	skipped	SAML SSO admin audit
+20261019153000_auth_hooks_sso_enforcement.sql	skipped	Supabase Auth hooks
+20261020100000_mcp_tools_call_preflight.sql	skipped	hosted round-trip optimisation; the server falls back to its ordinary reads when the function is missing
+20261020130000_acquisition_locale_de.sql	skipped	marketing acquisition attribution (check already a documented parity exception)
+20261020140000_acquisition_country.sql	skipped	marketing acquisition attribution (column a documented parity exception)
+20261020153717_dispatcher_early_returns.sql	skipped	pg_cron dispatchers; self-host runs the dispatcher service
+20261020153742_activity_log_retention_per_plan.sql	skipped	pg_cron retention job; self-host keeps activity_log until the operator prunes it
+20261020154243_triage_dispatch_fanout.sql	skipped	pg_cron/pg_net triage dispatcher fan-out; self-host's dispatcher service calls /triage-dispatch
+20261020164713_action_usage_meter_index.sql	skipped	index for the hosted usage meter (usage caps disabled on self-host)
+20261020164829_drop_duplicate_refresh_hash_index.sql	skipped	hosted OAuth refresh tokens (table intentionally absent)
+20261020165137_growth_work_mem_and_retention.sql	skipped	internal growth dashboard settings and pg_cron retention
+20261020214737_mcp_tools_call_gate.sql	skipped	hosted round-trip optimisation (preflight + usage reservation); the server falls back to its ordinary path when the function is missing
+20261020230000_inbox_folder_overrides.sql	partial	0019: inboxes.folder_overrides + inbox_folder_overrides_valid() + check; the authenticated column grant is hosted-only
+20261022180000_acquisition_connector_sources.sql	skipped	marketing acquisition attribution
+20261023200000_send_review_mode_chat.sql	partial	0019: 'chat' send_review_mode + workspaces.chat_send_confirm_enabled; the internal-staff rollout update is hosted-only
+20261024120000_abandoned_checkout_recovery.sql	skipped	Stripe checkout recovery emails
+20261024130000_outbound_abuse_brakes.sql	ported	0022: inbox_send_brakes, outbound_send_events, workspaces.sends_frozen_at/fanout_recipient_limit, outbound_send_gate()/outbound_send_refusal()
+20261024150000_pro_price_notice_cron.sql	skipped	hosted pricing announcement email (pg_cron)
+20261024160000_schedule_black_week_email.sql	skipped	hosted marketing email (pg_cron)
+20261024170000_first_30_days.sql	skipped	hosted lifecycle emails
+20261024173000_inbox_parking.sql	partial	0023: inboxes.parked_at/parked_reason + check, triage_rules paused_reason check; plan-limit parking itself is a hosted billing state
+20261024180000_chat_checkout_links.sql	partial	0025: workspaces.chat_checkout_link_enabled; checkout_link_issue() and its table are hosted-only (intentionally absent)
+20261024190000_payment_issue_columns.sql	partial	0025: workspaces.payment_issue_* + check; the mcp_tools_call_gate re-creation is hosted-only
+20261024190500_activation_help_emails.sql	skipped	hosted lifecycle emails
+20261024210000_subscription_cleanup.sql	ported	0024: subscription_plans, unsubscribe_requests, workspaces.subscription_cleanup_enabled
+20261024210100_schedule_subscription_followup.sql	skipped	pg_cron follow-up dispatcher for subscription clean-up
+20261024220000_cancellation_feedback.sql	partial	0025: product_funnel_events checks widened to the hosted lists; Stripe cancellation feedback is hosted-only
+20261024225000_dunning_measurement.sql	partial	0025: product_funnel_events checks widened to the hosted lists; Stripe dunning measurement is hosted-only
+20261024230000_webhook_endpoints.sql	skipped	hosted new-mail webhooks (client-api); not part of self-host
+20261024233000_pause_downgrade.sql	partial	0025: product_funnel_events checks widened to the hosted lists; Stripe pause/downgrade is hosted-only
+20261024233717_activation_rescue_stages.sql	partial	0025: product_funnel_events checks widened to the hosted lists; activation rescue emails are hosted-only
+20261024235100_pro_features_gate.sql	partial	0024: workspaces.pro_features_enabled + workspace_pro_features() without the hosted pricing switch
+20261024235200_reminders.sql	partial	0024: reminders + triggers; the pg_cron/Vault dispatcher is replaced by the dispatcher service calling /reminders-dispatch
+20261024235300_inbox_ai_instructions.sql	partial	0019: inboxes.ai_instructions(+_updated_at) + check; the authenticated column grant is hosted-only
+20261024235400_morning_briefs.sql	partial	0024: morning_briefs + trigger; the pg_cron/Vault dispatcher is replaced by the dispatcher service calling /morning-brief-dispatch
+20261025010000_personal_pass.sql	partial	0025: product_funnel_events checks widened to the hosted lists; the Personal pass is hosted billing
+20261025010100_personal_pass_surfaces.sql	skipped	hosted billing notices
+20261025020000_park_on_cancel_swap.sql	skipped	hosted billing: parking inboxes when a plan ends
+20261025030000_business_founder_places.sql	skipped	hosted pricing
+20261025040000_first30_auto_go_live.sql	skipped	hosted lifecycle emails
+20261025090000_referrals.sql	partial	0025: user_usage_entitlements.referral_personal_until + kind/source checks; the referral program and mcp_tools_call_gate re-creation are hosted-only
+20261025120000_eur_launch_cron.sql	skipped	hosted pricing (pg_cron)
+20261025130000_eur_launch_cron_off.sql	skipped	hosted pricing (pg_cron)
+20261026090000_schedule_site_feed.sql	skipped	hosted operator site feed (pg_cron)
+20261026100000_site_feed_emails_handled.sql	skipped	hosted operator site feed
+20261026120000_referral_enabled_for_everyone.sql	skipped	referral program rollout (workspaces.referral_enabled is a documented parity exception)
+20261026140000_mail_relay_learning_automation_runs.sql	ported	0020: final learn_mail_relay_host()
+20261026152301_onboarding_skeleton.sql	partial	0025: product_funnel_events checks widened to the hosted lists and the workspaces onboarding_client check; the dashboard onboarding is hosted-only
+20261026175000_dispatch_urls_from_vault.sql	skipped	pg_cron dispatchers reading Vault; self-host runs the dispatcher service
+20261026191717_onboarding_measurement.sql	partial	0025: product_funnel_events checks widened to the hosted lists; dashboard onboarding measurement is hosted-only
+20261026203517_install_link_clicked_stage.sql	partial	0025: product_funnel_events checks widened to the hosted lists
+20261026210000_draft_card_activity_deleted.sql	ported	0018: draft_card_activity action check includes 'deleted'
+20261026214313_app_password_link_clicked.sql	partial	0025: product_funnel_events checks widened to the hosted lists
+20261026221917_onboarding_connect_steps.sql	partial	0025: product_funnel_events checks widened to the hosted lists; claim_onboarding_welcome() is hosted-only (intentionally absent)
+20261026232117_authorize_funnel_stages.sql	partial	0025: product_funnel_events checks widened to the hosted lists
+20261026233917_onboarding_flow_b.sql	partial	0025: product_funnel_events checks widened to the hosted lists; claim_usage_meter_note(), onboarding_convert_on(), usage_month_summary() are hosted-only (intentionally absent)
+20261027120000_draft_events.sql	partial	0018: draft_events; the activity_log backfill and growth_* reporting are hosted-only
+20261027140000_api_keys_card_listed.sql	ported	0025: api_keys.card_listed (in the API-key lookup select)
+20261027150000_tools_call_gate_card_listed.sql	skipped	re-creates mcp_tools_call_gate, a hosted round-trip optimisation not ported
+20261027160000_draft_editor_for_everyone.sql	skipped	hosted rollout of the MCP Apps draft editor; self-host keeps it opt-in (default false is a documented parity exception)
+20261027170000_growth_milestone_unlocks.sql	skipped	internal growth dashboard
+20261027190000_chat_confirm_for_everyone.sql	ported	0019: workspaces.chat_send_confirm_enabled defaults to true
+20261027200000_draft_card_stats_linked.sql	skipped	internal growth dashboard
+20261027201500_bulk_undo_card.sql	ported	0025: workspaces.bulk_undo_hidden + bulk_plans scope_kind 'undo'
+20261027213000_growth_onboarding_band.sql	skipped	internal growth dashboard
+20261027230000_draft_card_stats_card_reads.sql	skipped	internal growth dashboard
+20261028090000_onboarding_exited.sql	partial	0025: product_funnel_events checks widened to the hosted lists
+20261028120000_growth_activity_daily_rollup.sql	skipped	internal growth dashboard
+20261028180000_draft_card_stats_listed.sql	skipped	internal growth dashboard
+20261028200000_draft_card_send_listed.sql	skipped	internal growth dashboard
+20261029200000_help_article_feedback.sql	skipped	hosted help center
+20261030120000_retention_low_risk.sql	skipped	pg_cron retention jobs; self-host keeps history until the operator prunes it
+20261030130000_account_and_inbox_purge.sql	skipped	pg_cron purge of deleted hosted accounts and inboxes
+20261030160000_inbox_autofill_lookups.sql	skipped	hosted dashboard inbox autofill
+20261030170000_inbox_autofill_scoreboard_window.sql	skipped	internal growth dashboard
+20261030200000_experiment_stats_workspace_subjects.sql	skipped	hosted experiments (tables intentionally absent)
+20261030210000_support_retention.sql	skipped	hosted help center retention
+20261030220000_support_ticket_random_ref.sql	skipped	hosted help center
+20261031120000_activity_log_draft_calls_index.sql	skipped	index for the internal growth dashboard
+20261103120000_fanout_brake_scope.sql	ported	0022: inbox_send_brakes.fanout_content_hash + final outbound_send_gate()
+20261103150000_acquisition_locale_pt_ja.sql	skipped	marketing acquisition attribution (check already a documented parity exception)
+20261111120000_marketing_consent_v2.sql	skipped	marketing consent at web sign-up (users columns already documented parity exceptions)
+20261111140000_inbox_broken_alert.sql	partial	0025: product_funnel_events checks widened to the hosted lists; the broken-inbox alert email is hosted-only
+20261111140100_payment_failed_restart_email.sql	skipped	hosted lifecycle email
+20261111140200_annual_switch_and_renewal_reminder.sql	partial	0025: product_funnel_events checks widened to the hosted lists; annual-switch card and renewal email are hosted billing (workspaces columns are documented parity exceptions)
+20261111140300_plan_ending_reminder.sql	partial	0025: product_funnel_events checks widened to the hosted lists; the plan-ending email is hosted billing
+20261111150000_heard_about.sql	partial	0025: product_funnel_events checks widened to the hosted lists; the dashboard 'heard about' question is hosted-only (workspaces columns are documented parity exceptions)
+20261111180000_free_reset_email.sql	partial	0025: product_funnel_events checks widened to the hosted lists; the Free reset email is hosted-only
+20261111190000_inbox_owner_visibility.sql	partial	0021,0023,0024: inboxes.owner_user_id/visibility, owner guard, credential_inbox_scope*(), scheduled_sends/reminders.created_by; default_inbox_visibility() is a constant 'company' (hosted reads pricing_switches); RLS helpers and audit tables are hosted-only
+20261111190100_business_admin_audit.sql	partial	0021,0023: workspaces.allowed_recipient_domains, send_approvals.hold_reason/requested_by, activity_log.user_id + fill trigger; workspace audit events and admin RLS are hosted-only
+20261112130000_refusal_message_key.sql	ported	0022: final outbound_send_refusal() overloads
+20261113100000_client_events.sql	skipped	hosted web client analytics
+20261114110000_approval_window.sql	partial	0021: workspaces.approval_window_hours + check; the workspace_audit_events kind check is hosted-only
+20261116120000_openai_plugin_measurement.sql	skipped	internal growth dashboard
+20261117120000_held_send_dedupe_key.sql	ported	0021: send_approvals.dedupe_key + check + pending index

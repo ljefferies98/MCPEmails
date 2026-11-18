@@ -18,8 +18,8 @@
     "eyebrow": "Spark Xtra Mail + IA",
     "titleLine1": "Conecta tu bandeja de Xtra Mail",
     "titleLine2": "a Claude, Cursor y cualquier cliente MCP",
-    "lead": "Xtra Mail acepta una contraseña normal por IMAP, sin contraseña de aplicación que generar y sin un segundo factor de por medio. mcpemails la conecta para que tu agente de IA pueda leer, buscar, enviar, responder y archivar ese correo.",
-    "answer": "Claude no puede acceder por sí solo a una bandeja de Xtra Mail. mcpemails es un servidor MCP alojado que la conecta por IMAP en imap.xtra.co.nz en el puerto 993, iniciando sesión con tu dirección xtra.co.nz completa y tu contraseña normal de Xtra Mail. Spark no emite contraseñas específicas de aplicación para Xtra Mail e indica que su verificación en dos pasos solo se aplica en el portal de webmail y no a los clientes de correo, así que una contraseña correcta autentica directamente incluso con la verificación en dos pasos activada. Una vez conectada, Claude, Cursor o cualquier otro cliente MCP puede leer, buscar, enviar y organizar ese correo. Una bandeja es gratis, para siempre.",
+    "lead": "Xtra Mail acepta una contraseña normal por IMAP, sin contraseña de aplicación que generar y sin un segundo factor de por medio. MCPEmails la conecta para que tu agente de IA pueda leer, buscar, enviar, responder y archivar ese correo.",
+    "answer": "Claude no puede acceder por sí solo a una bandeja de Xtra Mail. MCPEmails es un servidor MCP alojado que la conecta por IMAP en imap.xtra.co.nz en el puerto 993, iniciando sesión con tu dirección xtra.co.nz completa y tu contraseña normal de Xtra Mail. Spark no emite contraseñas específicas de aplicación para Xtra Mail e indica que su verificación en dos pasos solo se aplica en el portal de webmail y no a los clientes de correo, así que una contraseña correcta autentica directamente incluso con la verificación en dos pasos activada. Una vez conectada, Claude, Cursor o cualquier otro cliente MCP puede leer, buscar, enviar y organizar ese correo. Una bandeja es gratis, para siempre.",
     "meta0": "1 bandeja gratis, para siempre",
     "meta1": "Tu contraseña de Xtra, sin contraseña de aplicación",
     "meta2": "El correo se obtiene en vivo, nunca se almacena"
@@ -30,7 +30,7 @@
   },
   "setup": [
     {
-      "h": "Crea una cuenta gratis en mcpemails",
+      "h": "Crea una cuenta gratis en MCPEmails",
       "p": "Regístrate en mcpemails.com. El plan gratuito conecta una bandeja y no pide tarjeta."
     },
     {
@@ -39,7 +39,7 @@
     },
     {
       "h": "Introduce la dirección completa y tu contraseña de Xtra Mail",
-      "p": "En mcpemails elige IMAP / SMTP e introduce la dirección exactamente como la escribe Spark, por ejemplo <code>joe.bloggs@xtra.co.nz</code>, con la contraseña que usas para iniciar sesión en el webmail de Xtra. Los servidores y puertos indicados arriba ya vienen rellenados y se verificaron con una conexión TLS real."
+      "p": "En MCPEmails elige IMAP / SMTP e introduce la dirección exactamente como la escribe Spark, por ejemplo <code>joe.bloggs@xtra.co.nz</code>, con la contraseña que usas para iniciar sesión en el webmail de Xtra. Los servidores y puertos indicados arriba ya vienen rellenados y se verificaron con una conexión TLS real."
     },
     {
       "h": "Pega la URL MCP en tu IA",
@@ -60,19 +60,19 @@
       "p": "La página de configuración de Spark indica como servidor saliente <code>send.xtra.co.nz</code> en el puerto <b>587</b> con StartTLS. La conexión que verificamos en ese mismo servidor es el puerto <b>465</b> con TLS implícito, que completó un handshake y ofreció PLAIN y LOGIN. Ambas son reales. La tabla de esta página muestra lo que probamos; si un cliente se empeña en la combinación documentada, el 587 con STARTTLS es la respuesta publicada por Spark y también debería funcionar."
     },
     {
-      "h": "Sin SASL-IR, sin IDLE, sin MOVE y sin SPECIAL-USE",
-      "p": "El servidor de Xtra anuncia una lista corta: IMAP4rev1, UIDPLUS, NAMESPACE, ID y los mecanismos PLAIN y LOGIN. Sin SASL-IR rechaza la autenticación en un solo paso que la mayoría de los clientes prueban primero, y la respuesta es un rechazo escueto que parece una contraseña incorrecta. Sin IDLE no hay push, así que el correo nuevo se encuentra consultando periódicamente. Sin MOVE, archivar se ejecuta como COPY, luego STORE y luego EXPUNGE. Sin SPECIAL-USE, Enviados y Papelera se identifican por su nombre. UIDPLUS sí está, así que un mensaje copiado informa de su nuevo id."
+      "h": "Ahora se anuncian SASL-IR e IDLE; MOVE y SPECIAL-USE siguen sin anunciarse",
+      "p": "Cuando este servidor se probó por primera vez en agosto anunciaba una lista mínima: IMAP4rev1, UIDPLUS, NAMESPACE, ID y los mecanismos PLAIN y LOGIN, sin SASL-IR y sin IDLE. En la fecha que se indica en esta página el mismo servidor respondió en cambio con una lista de capacidades al estilo Dovecot: SASL-IR e IDLE presentes, PLAIN y LOGIN como mecanismos, y UIDPLUS ya no anunciado antes del inicio de sesión. Así que la autenticación en un solo paso se acepta y el correo nuevo puede detectarse en una conexión abierta. Lo que no ha cambiado: sin MOVE, archivar se ejecuta como COPY, luego STORE y luego EXPUNGE, y sin SPECIAL-USE, Enviados y Papelera se identifican por su nombre. Spark no anunció el cambio; es lo que dice hoy el servidor, y la tabla de arriba sigue al servidor."
     }
   ],
   "limits": [
     "El servidor SMTP de Spark anuncia un tamaño máximo de mensaje de unos 100 MB, que es generoso, pero un envío más grande se sigue rechazando antes de salir.",
-    "Sin IDLE, así que el correo nuevo se descubre consultando periódicamente en lugar de enviarse a la conexión.",
-    "Los movimientos no son atómicos y las funciones de las carpetas se identifican por su nombre, porque MOVE y SPECIAL-USE no están implementados en este servidor."
+    "MOVE no está implementado, así que un movimiento no es atómico. Si la conexión se corta a mitad de la operación, un mensaje puede existir brevemente en ambas carpetas.",
+    "Las funciones de las carpetas se identifican por su nombre porque SPECIAL-USE no se anuncia. Si has renombrado Enviados o Papelera, nombra la carpeta al pedir un movimiento."
   ],
   "faq": [
     {
       "q": "¿Funciona Claude con Xtra Mail?",
-      "a": "No directamente. Claude no tiene un conector integrado para Spark ni para Xtra. Conectar un servidor MCP como mcpemails al buzón por IMAP le da a Claude acceso para leer, buscar, enviar, responder, programar y organizar tu correo de xtra.co.nz, y la misma conexión funciona en Cursor, ChatGPT y otros clientes MCP."
+      "a": "No directamente. Claude no tiene un conector integrado para Spark ni para Xtra. Conectar un servidor MCP como MCPEmails al buzón por IMAP le da a Claude acceso para leer, buscar, enviar, responder, programar y organizar tu correo de xtra.co.nz, y la misma conexión funciona en Cursor, ChatGPT y otros clientes MCP."
     },
     {
       "q": "¿Cuáles son los ajustes IMAP y SMTP de Xtra Mail?",

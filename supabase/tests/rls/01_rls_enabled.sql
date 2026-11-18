@@ -10,7 +10,7 @@
 
 BEGIN;
 
-SELECT plan(20);
+SELECT plan(22);
 
 -- ----------------------------------------------------------------
 -- Assertion helper: checks relrowsecurity flag in pg_class
@@ -243,6 +243,30 @@ SELECT ok(
     AND    c.relkind = 'r'
   ),
   'inbox_watch_state table has RLS enabled'
+);
+
+SELECT ok(
+  (
+    SELECT c.relrowsecurity
+    FROM   pg_class c
+    JOIN   pg_namespace n ON n.oid = c.relnamespace
+    WHERE  n.nspname = 'public'
+    AND    c.relname = 'draft_lineage'
+    AND    c.relkind = 'r'
+  ),
+  'draft_lineage table has RLS enabled'
+);
+
+SELECT ok(
+  (
+    SELECT c.relrowsecurity
+    FROM   pg_class c
+    JOIN   pg_namespace n ON n.oid = c.relnamespace
+    WHERE  n.nspname = 'public'
+    AND    c.relname = 'help_article_feedback'
+    AND    c.relkind = 'r'
+  ),
+  'help_article_feedback table has RLS enabled'
 );
 
 -- ----------------------------------------------------------------

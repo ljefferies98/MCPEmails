@@ -28,6 +28,8 @@ import {
   unappliedSearchFields,
   type NormalizedSearch,
 } from '../../../../../supabase/functions/mcp-server/search-translate.ts';
+import { isForbiddenMoveDestination } from '../../../../../supabase/functions/mcp-server/triage-forbidden-destinations.ts';
+import { canAccessInbox } from '../inboxes/visibility.ts';
 
 /** Cadences the dispatcher understands. Mirrors the interval_minutes CHECK. */
 export const ALLOWED_INTERVALS = [15, 30, 60, 180, 360, 720, 1440] as const;
@@ -72,14 +74,13 @@ export const MAX_MESSAGES_PER_RUN = 200;
 const DELETE_SHAPED = ['delete', 'trash', 'purge', 'remove', 'destroy', 'erase', 'expunge'];
 
 // Move destinations refused because moving mail there is deletion wearing a
-// different hat: every provider auto-purges trash and junk on a timer, so an
-// unattended move to Trash is a delete with a delayed fuse. Kept in step with
-// TRIAGE_FORBIDDEN_MOVE_DESTINATIONS in
-// supabase/functions/mcp-server/triage-engine.ts, which is the enforcing copy.
-const FORBIDDEN_MOVE_DESTINATIONS = [
-  'trash', 'bin', 'deleted', 'deleted items', 'deleted messages', 'junk', 'spam',
-];
-
+// different hat: every provider auto-purges trash on a timer, so an unattended
+// move to Trash is a delete with a delayed fuse. Junk and spam are allowed.
+// IMPORTED from the edge function rather than copied: the refused names are
+// derived from the folder resolver's localized trash names (Papierkorb, Корзина,
+// Éléments supprimés, ...), and a copy here is how this list stayed English
+// while the resolver learned 42 languages. Pure and import-free apart from
+// imap-folder-target.ts, for the reason given above unrunnableFilterFields.
 /**
  * The date shape a stored filter may hold.
  *
@@ -106,11 +107,6 @@ export function isIsoDateOrDateTime(value: string): boolean {
   const [, date, time, zone] = match;
   const normalized = time === undefined ? `${date}T00:00:00Z` : `${date}T${time}${zone ?? 'Z'}`;
   return !Number.isNaN(new Date(normalized).getTime());
-}
-
-function folderLeaf(folder: string): string {
-  const leaf = folder.split(/[/.\\]/).filter(Boolean).pop() ?? folder;
-  return leaf.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -248,10 +244,10 @@ export function validateAction(raw: unknown): ValidationResult<StoredAction> {
     const folder = typeof input.folder === 'string' ? input.folder.trim() : '';
     if (!folder) return fail('Choose the folder to move matching mail into.');
     if (folder.length > 200) return fail('A folder name can be at most 200 characters.');
-    if (FORBIDDEN_MOVE_DESTINATIONS.includes(folderLeaf(folder))) {
+    if (isForbiddenMoveDestination(folder)) {
       return fail(
-        'Automations cannot move mail into trash or junk. Those folders are emptied '
-        + 'automatically, so it would be a delete on a timer. Choose a folder you own.',
+        'Automations cannot move mail into the trash. It is emptied automatically, '
+        + 'so it would be a delete on a timer. Choose a folder you own.',
       );
     }
     return { ok: true, value: { type: 'move', folder } };
@@ -413,6 +409,10 @@ export async function assertWorkspaceResources(
   workspaceId: string,
   inboxId: string,
   apiKeyId: string,
+  // The signed-in caller. When given, the inbox must also be visible to them
+  // (the Business privacy model, migration 20261111190000): nobody points an
+  // automation at someone else's private inbox, owners and admins included.
+  userId?: string,
 ): Promise<{ error: string; status: number } | null> {
   const { data: inbox } = await db.from('inboxes')
     .select('id, deleted_at')
@@ -420,6 +420,9 @@ export async function assertWorkspaceResources(
     .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (!inbox || inbox.deleted_at) return { error: 'That inbox is not available in this workspace.', status: 400 };
+  if (userId !== undefined && !(await canAccessInbox(db, inboxId, userId))) {
+    return { error: 'That inbox is not available in this workspace.', status: 400 };
+  }
 
   const { data: key } = await db.from('api_keys')
     .select('id, scopes, inbox_ids, deleted_at')

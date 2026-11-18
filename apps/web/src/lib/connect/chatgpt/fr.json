@@ -1,0 +1,24 @@
+{
+  "eyebrow": "ChatGPT",
+  "title": "Utiliser {provider} dans ChatGPT",
+  "sub": "ChatGPT accède à {provider} via un serveur MCP personnalisé, que vous ajoutez sur chatgpt.com avec une formule payante.",
+  "steps": [
+    "Connectez {provider} à MCPEmails avec les étapes ci-dessus.",
+    "Sur chatgpt.com, ouvrez Plugins, Personal, cliquez sur Add, puis sur Add custom MCP server.",
+    "Nommez-le MCPEmails, collez <code>https://mcpemails.com/api/mcp</code> sous Connection, choisissez OAuth, confirmez, cliquez sur Create as a plugin et connectez-vous à MCPEmails.",
+    "Dans une conversation, tapez <b>@</b> et choisissez MCPEmails. Recommencez quand une question de suivi porte sur vos e-mails."
+  ],
+  "docsLink": "Guide complet de configuration de ChatGPT",
+  "blogLink": "Comment connecter ChatGPT à votre messagerie",
+  "faqQ": "ChatGPT peut-il lire mes e-mails {provider} ?",
+  "faqQMailName": "ChatGPT peut-il lire mes e-mails {provider} ?",
+  "faqA": "Oui, une fois {provider} connecté à MCPEmails. Sur chatgpt.com, ajoutez un serveur MCP personnalisé avec l'URL https://mcpemails.com/api/mcp et une connexion OAuth. Il faut une formule payante : la page d'aide d'OpenAI nomme Business et Enterprise/Edu pour la prise en charge complète et Pro pour les outils en lecture seule. ChatGPT n'obtient que les accès que vous approuvez, et vos e-mails sont lus en direct, jamais stockés.",
+  "directorySub": "ChatGPT accède à {provider} via Any Mailbox, le plugin MCPEmails de l'annuaire de plugins de ChatGPT.",
+  "directorySteps": [
+    "Connectez {provider} à MCPEmails avec les étapes ci-dessus.",
+    "Dans ChatGPT, ouvrez Plugins, trouvez Any Mailbox dans l'annuaire de plugins et cliquez sur Install plugin, puis sur Connect.",
+    "Connectez-vous à MCPEmails et choisissez les boîtes auxquelles ChatGPT peut accéder. Dans une conversation, tapez <b>@</b> et choisissez Any Mailbox."
+  ],
+  "directoryLink": "Any Mailbox dans l'annuaire de plugins de ChatGPT",
+  "directoryFaqA": "Oui, une fois {provider} connecté à MCPEmails. Installez Any Mailbox depuis l'annuaire de plugins de ChatGPT et connectez-vous à MCPEmails. ChatGPT n'obtient que les accès que vous approuvez, et vos e-mails sont lus en direct, jamais stockés."
+}

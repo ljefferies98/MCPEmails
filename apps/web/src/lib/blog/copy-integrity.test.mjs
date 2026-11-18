@@ -53,6 +53,9 @@ const IN_PROGRESS = {
   fr: /en cours|bient[oô]t disponible|pas encore disponible|ne pouvez pas connecter|peuvent pas encore|pas encore connectable/i,
   nb: /under utvikling|under arbeid|kommer snart|enn[aå] ikke allment tilgjengelig|kan (?:enn[aå] )?ikke kobles?|ikke mulig [aå] koble til enn[aå]/i,
   zh: /(?:正|仍)在开发中|即将推出|尚未全面开放|尚未在生产环境中提供|无法在生产环境中连接|目前还不能连接/,
+  de: /in Entwicklung|in Arbeit|demn[aä]chst verf[uü]gbar|kommt bald|noch nicht allgemein verf[uü]gbar|(?:k[oö]nnen|l[aä]sst sich) (?:noch )?nicht verbunden|noch nicht verbindbar/i,
+  pt: /em desenvolvimento|em breve|ainda n[aã]o (?:est[aá] )?dispon[ií]vel para todos|ainda n[aã]o (?:[eé] poss[ií]vel|pode) conectar|ainda n[aã]o conect[aá]vel/i,
+  ja: /開発中|近日(?:公開|提供)|まだ一般提供されていません|まだ接続できません|まだ接続できない/,
 };
 
 /**
@@ -69,6 +72,9 @@ const ADMIN_CAVEAT = {
   fr: /administrateur informatique|approbation de l.administrateur/i,
   nb: /IT-ansvarlig|administratorgodkjenning/i,
   zh: /IT 管理员|管理员批准/,
+  de: /IT-Administrator|IT-Admin|Administrator-?(?:genehmigung|freigabe)|Freigabe durch (?:einen|Ihren|die) (?:IT-)?Admin/i,
+  pt: /administrador de TI/i,
+  ja: /IT管理者/,
 };
 
 const localeFiles = (slug) =>
@@ -146,6 +152,9 @@ const GMAIL_ONE_CLICK = {
   fr: /OAuth en un clic|Gmail utilise OAuth|Gmail \(OAuth\)|connexion Gmail utilise Google OAuth/i,
   nb: /ett-klikks OAuth|Gmail bruker OAuth|Gmail \(OAuth\)|Gmail-tilkoblingen bruker Google OAuth/i,
   zh: /一键 ?OAuth|Gmail 使用 OAuth|Gmail（OAuth）|Gmail 连接使用 Google OAuth/,
+  de: /OAuth mit einem Klick|Ein-Klick-OAuth|Gmail (?:nutzt|verwendet) OAuth|Gmail \(OAuth\)|Gmail-Verbindung (?:nutzt|verwendet) Google OAuth/i,
+  pt: /OAuth (?:com|em) um clique|Gmail usa OAuth|Gmail \(OAuth\)|conex[aã]o (?:com o|do) Gmail usa (?:o )?Google OAuth/i,
+  ja: /ワンクリック(?:で)?(?:の)? ?OAuth|GmailはOAuthを使用|Gmail ?[（(]OAuth[）)]|Gmailの接続はGoogle OAuthを使用/,
 };
 
 for (const slug of allPostSlugs) {
@@ -180,22 +189,47 @@ test('the Outlook guide is indexable now that the connector is live', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * House rule is no em dashes, in any language. The rest of the blog corpus is
- * not clean yet (23 English posts and 72 translations still carry them), so
- * this pins the slugs that have been swept. Add a slug here as it is cleaned.
+ * House rule is no em dashes, in any language. Every English post and every
+ * fr, es, nb, de, pt and ja translation is clean (swept 2026-11-10); only the
+ * frozen zh translations of 16 posts still carry them, so this pins every
+ * slug whose files are all clean. Add a slug here as its zh file is cleaned.
  */
 const EM_DASH_CLEAN_SLUGS = [
+  'ai-agent-email-workflows-and-prompts',
+  'ai-email-for-agencies-and-client-work',
+  'approve-ai-agent-email-sends',
+  'automated-email-triage-rules',
+  'claude-imap-connector',
+  'connect-business-email-custom-domain-to-ai-agent',
+  'extract-email-attachments-for-ai',
+  'gmail-labels-vs-imap-folders-ai-agents',
+  'multiple-email-accounts-in-claude-and-chatgpt',
+  'prevent-duplicate-ai-agent-email-sends',
+  'can-claude-read-my-email',
+  'chatgpt-icloud-mail-plugin',
+  'daily-email-briefing-with-claude-and-chatgpt',
+  'multiple-email-accounts-in-claude-cowork',
+  'claude-custom-connectors-explained',
   'connect-chatgpt-to-email',
+  'connect-chatgpt-to-outlook-com-hotmail',
   'connect-claude-to-email',
+  'connect-claude-to-outlook-com-hotmail',
+  'connect-claude-to-apple-mail',
   'connect-gmail-to-claude',
   'connect-outlook-microsoft-365-ai-agent-mcp',
   'manage-multiple-email-accounts-with-ai',
+  'schedule-email-with-claude-and-chatgpt',
+  'what-is-an-app-password',
+  'connect-yahoo-mail-to-chatgpt-and-claude',
 ];
 
 for (const slug of EM_DASH_CLEAN_SLUGS) {
   const files = [
     join(postsDir, `${slug}.js`),
-    ...readdirSync(join(translationsDir, slug)).map((file) => join(translationsDir, slug, file)),
+    // An English-only post has no translations folder yet.
+    ...(existsSync(join(translationsDir, slug))
+      ? readdirSync(join(translationsDir, slug)).map((file) => join(translationsDir, slug, file))
+      : []),
   ];
 
   for (const path of files) {
