@@ -6,14 +6,21 @@ import { useTranslations } from 'next-intl';
 import { Icon, Btn, ProviderLogo } from '../Primitives';
 import { trackProductEvent } from '@/lib/analytics.mjs';
 import { useInboxPaywallView } from '@/lib/analytics/use-inbox-paywall.mjs';
+import { parseConnectEntryPoint } from '@/lib/analytics/connect-entry-point.mjs';
 import { OAUTH_VERIFICATION_PENDING } from '@/lib/oauth/verification-status';
 import { Link } from '@/i18n/navigation';
 import { pricingCompareHref } from '@/lib/billing/upgrade-intent.mjs';
 import { inboxCapOffer, splitSharedFeatures } from '@/lib/billing/inbox-cap-offer.mjs';
-import { formatPriceCents } from '@/lib/stripe/annual-offer';
+import { formatAmountCents, formatPriceCents } from '@/lib/stripe/annual-offer';
+import { founderCapCopy } from '@/lib/billing/founder-cap-copy.mjs';
+import FounderPriceNote from './FounderPriceNote';
+import { CheckoutReassurance } from '../CheckoutReassurance';
+import { useAppLocale } from '../i18n/AppLocaleProvider';
 import UpgradeIntervalChoice, {
   annualOfferForPlan,
   PlanCheckoutLink,
+  ProPriceAppNotice,
+  SeasonalOfferNote,
   SharedIntervalChoice,
 } from './UpgradeIntervalChoice';
 import { planDisplayName } from './Pages';
@@ -34,13 +41,52 @@ import {
 // node:dns and cannot be pulled into a client bundle.
 import { ALLOWED_MAIL_PORTS, allowedMailPorts } from '@/lib/email/mail-ports';
 import { useToast } from './Toast';
-import { emailDomain, prefillFromDomain } from '@/lib/email-providers/host-presets';
+import { emailDomain, findMailHostPreset, prefillFromDomain } from '@/lib/email-providers/host-presets';
 import { isMicrosoftConsumerAddress } from '@/lib/email-providers/microsoft-accounts';
 import {
   identifyAppPasswordProvider,
   checkAppPasswordShape,
 } from '@/lib/email-providers/app-password';
-import { authFailureHelp } from '@/lib/email/auth-failure-help';
+import { authFailureHelp, connectFix } from '@/lib/email/auth-failure-help';
+import { recordActivationEvent } from '@/lib/analytics/record-activation-event';
+
+/**
+ * The connect check that outlives the modal.
+ *
+ * A check runs 20 to 40 seconds with the relay, and people close the modal
+ * while it runs and open it again. The request keeps going either way (see
+ * `mountedRef`), so its answer is kept here, at module scope, for the next
+ * modal to pick up: a failure reopens on the same form with the same fix, and
+ * a check still in flight shows its progress line again instead of a blank
+ * form. The password is never kept.
+ *
+ *   pending  { snapshot, startedAt }  a check is in flight
+ *   outcome  { snapshot, kind, status, data, at }  a check answered while no modal was open
+ *   listener the open modal that wants the in-flight answer, if any
+ */
+const checkMemory = { pending: null, outcome: null, listener: null };
+/** How long a kept failure is still worth reopening on. */
+const CHECK_MEMORY_TTL_MS = 15 * 60 * 1000;
+
+/** Exported for tests only. */
+export function resetConnectCheckMemoryForTests() {
+  checkMemory.pending = null;
+  checkMemory.outcome = null;
+  checkMemory.listener = null;
+}
+
+/** Display names for the client the post-connect screen names. */
+const CLIENT_NAMES = {
+  claude: 'Claude', chatgpt: 'ChatGPT', cursor: 'Cursor', vscode: 'VS Code', cline: 'Cline',
+  windsurf: 'Windsurf', gemini: 'Gemini', zed: 'Zed', jetbrains: 'JetBrains', raycast: 'Raycast', warp: 'Warp',
+};
+
+/**
+ * Generated tokens from providers outside the six app-password policies that
+ * are still shown in groups, so a pasted space is never part of the secret.
+ * T-Online is not here: its mail-program password is chosen by the user.
+ */
+const GENERATED_TOKEN_PRESETS = new Set(['aol', 'qq', 'mail-ru', 'infomaniak']);
 
 /**
  * Zoho serves personal (@zohomail.com) and organization (paid custom-domain)
@@ -109,6 +155,8 @@ const AUTH_REASON_HEADLINE_KEYS = {
   app_password_required: 'connect.errorAuthAppPassword',
   account_password_used: 'connect.errorAuthAccountPassword',
   app_password_length: 'connect.errorAuthAppPasswordLength',
+  // The provider refused the sign-in itself; the password is not the story.
+  provider_refused_signin: 'connect.errorAuthProviderRefused',
   login_username_required: 'connect.errorAuthLoginName',
   // The plain case keeps the plain headline. It is listed so the reason is
   // kept: what to do next is host-specific, and lib/email/auth-failure-help
@@ -143,11 +191,19 @@ const ERROR_HEADLINE_KEYS = {
   // 409: the address is already connected through Gmail or Outlook OAuth,
   // and the route refused to convert it. See lib/inboxes/provider-conflict.ts.
   inbox_exists_other_provider: 'connect.errorInboxOtherProviderShort',
+  // 409: the address is somebody else's private mailbox in this workspace
+  // (lib/inboxes/visibility.ts); the route refused to overwrite it.
+  inbox_owned_by_other: 'connect.errorInboxOwnedByOtherShort',
+  // 402: Business per-person private mailbox cap; not an upgrade case.
+  private_inbox_limit_reached: 'connect.errorPrivateInboxLimitShort',
   // 422: a personal Microsoft address (outlook.com, hotmail.*, live.*,
   // msn.com) on the IMAP or app-password form. Microsoft turned off password
   // sign-in for those on 2024-09-16, so no server or password can make it
   // work; the inline notice under the address points at the Outlook card.
   microsoft_account_use_outlook: 'connect.errorMicrosoftAccountShort',
+  // 422: a Yahoo! JAPAN address (@yahoo.co.jp) on the Yahoo card. A separate
+  // service with no app passwords; the generic form has its servers.
+  yahoo_japan_use_generic: 'connect.errorYahooJapanShort',
   // ── The SSRF guard's own refusals (lib/email/host-guard.ts) ──────────────
   // All three were reaching the user as "Connection failed. Please try again."
   // with the guard's actual sentence folded behind a disclosure that stayed
@@ -186,6 +242,22 @@ const ERROR_HEADLINE_KEYS = {
  * leaving the user to work out that the mailbox was never the problem.
  */
 const SESSION_EXPIRED_CODE = 'session_expired';
+
+/**
+ * The "Still stuck? Contact support" target for a failed connect.
+ *
+ * The dashboard's own help section, since the person is already in the app.
+ * It reads `topic`, `provider` and `code` to preselect the contact form and
+ * `#contact` opens it. Each value is URL-encoded, and an empty one is left out
+ * rather than sent as `provider=`, so the form never has to tell "unknown"
+ * from "blank". No locale prefix: the dashboard is not under app/[locale].
+ */
+export function supportContactHref(provider, code) {
+  const params = [['topic', 'connect'], ['provider', provider], ['code', code]]
+    .filter(([, v]) => typeof v === 'string' && v.trim() !== '')
+    .map(([k, v]) => `${k}=${encodeURIComponent(v.trim())}`);
+  return `/dashboard/help?${params.join('&')}#contact`;
+}
 
 /**
  * The app's ordinary "sign in and come back here" link.
@@ -567,10 +639,52 @@ export function ConnectModal({
   stripePrices = null,
   reconnect = null,
   businessShaped = false,
+  // Onboarding Flow B (onb_convert = on): the cap panel's dismiss reads
+  // "Continue on Free" at full button weight.
+  continueOnFree = false,
+  // Whether "Prefer to sign in with Google?" is offered on the Gmail card:
+  // Pro and Business only, and only while the unverified Google client has
+  // lifetime slots left (src/lib/oauth/gmail-oauth-gate.ts, decided by the
+  // dashboard page). /auth/gmail enforces the same rule server-side.
+  gmailOauthAllowed = false,
   onAdminConsentLink = null,
   preselect = null,
+  // Which control opened this modal: one name from the closed list in
+  // lib/analytics/connect-entry-point.mjs, set by App.jsx's `openConnect`. It
+  // rides on the rows this modal already writes and changes nothing on screen.
+  entryPoint = null,
+  // Called with the help href on a plain click of "Contact support", so the
+  // dashboard can switch to its help section without a reload. Without it the
+  // link is an ordinary navigation to the same place.
+  onContactSupport = null,
+  // 'outlook_cancelled' when the Outlook callback came back with the person
+  // having declined Microsoft's consent screen (App.jsx reads ?error=).
+  returnNotice = null,
+  // True for the workspace's first inbox: after it connects, the modal stays
+  // open on a "Now connect your AI app" screen instead of closing.
+  showNextStepAfterConnect = false,
+  // Opens the Overview client guide (GettingStartedGuide / ClientGuideModal)
+  // with the given client preselected. Called from that last screen.
+  onOpenClientGuide = null,
+  // The client chosen during onboarding, when the page already knows it.
+  onboardingClient = null,
 }) {
   const tr = useTranslations('dashboardChrome');
+  const tConvert = useTranslations('convert');
+  const { locale: appLocale } = useAppLocale();
+  /**
+   * A check this modal should pick up from a previous one (see checkMemory):
+   * read once, on mount, and only for an ordinary connect. Seeds the initial
+   * provider, step and form below so the form is back before the first paint.
+   */
+  const [restored] = useState(() => {
+    if (reconnect != null || preselect || atInboxLimit || returnNotice) return null;
+    if (checkMemory.outcome && Date.now() - checkMemory.outcome.at < CHECK_MEMORY_TTL_MS) {
+      return { kind: 'outcome', ...checkMemory.outcome };
+    }
+    if (checkMemory.pending) return { kind: 'pending', ...checkMemory.pending };
+    return null;
+  });
   // The toast lives in ToastProvider, above this modal in App.jsx, so it
   // survives the modal being closed. That is what makes it safe to let someone
   // walk away from a verification that is still running: see `deliverOutcome`.
@@ -598,9 +712,23 @@ export function ConnectModal({
     ? preselect
     : null;
   const seedForm = seed?.card === 'generic' ? (seed.form ?? null) : null;
-  const [provider, setProvider] = useState(reconnectProvider ?? seed?.card ?? 'generic');
-  const [step, setStep] = useState(isReconnect ? 2 : 1);
-  const [form, setForm] = useState(() => ({
+  const restoredSnapshot = restored?.snapshot ?? null;
+  const [provider, setProvider] = useState(
+    reconnectProvider ?? seed?.card ?? restoredSnapshot?.provider ?? (returnNotice === 'outlook_cancelled' ? 'outlook' : 'generic')
+  );
+  // 1 = provider, 2 = credentials, 3 = connected ("Now connect your AI app").
+  const [step, setStep] = useState(isReconnect || restoredSnapshot ? 2 : 1);
+  /**
+   * Which halves of a generic IMAP/SMTP mailbox this connection carries:
+   * 'both', 'imap' (receive only) or 'smtp' (send only). A receive-only
+   * mailbox has no SMTP server to give and a send-only one has no IMAP server,
+   * and requiring both shut either out. A reconnect keeps the mode the inbox
+   * was stored with, for the same reason it keeps the hosts: Reconnect means
+   * "re-enter my password". The type is changed on the inbox itself, under
+   * Advanced > Connection type (ConnectionTypeEditor.jsx).
+   */
+  const [connectionMode, setConnectionMode] = useState(reconnect?.connectionMode ?? restoredSnapshot?.connectionMode ?? 'both');
+  const [form, setForm] = useState(() => restoredSnapshot ? { ...restoredSnapshot.form, password: '' } : ({
     email: reconnect?.address ?? '',
     username: reconnect?.username ?? '',
     password: '',
@@ -630,17 +758,17 @@ export function ConnectModal({
    * host falls back to the same defaults a fresh connect starts from.
    */
   const reconnectZoho = isReconnect ? zohoSettingsFromHost(reconnect?.imapHost) : null;
-  const [zohoRegion, setZohoRegion] = useState(reconnectZoho?.region ?? DEFAULT_ZOHO_REGION);
+  const [zohoRegion, setZohoRegion] = useState(reconnectZoho?.region ?? restoredSnapshot?.zohoRegion ?? DEFAULT_ZOHO_REGION);
   const [zohoAccountType, setZohoAccountType] = useState(
-    reconnectZoho?.accountType ?? DEFAULT_ZOHO_ACCOUNT_TYPE
+    reconnectZoho?.accountType ?? restoredSnapshot?.zohoAccountType ?? DEFAULT_ZOHO_ACCOUNT_TYPE
   );
   // Optional login override for Yandex 360 custom-domain accounts whose IMAP
   // login differs from the email address. Blank → authenticate with the email.
   // On a reconnect of a Yandex inbox, seed it with the stored login.
   const [yandexLogin, setYandexLogin] = useState(
-    isReconnect && reconnectProvider === 'yandex' ? (reconnect.username ?? '') : ''
+    isReconnect && reconnectProvider === 'yandex' ? (reconnect.username ?? '') : (restoredSnapshot?.yandexLogin ?? '')
   );
-  const [yandexAccountType, setYandexAccountType] = useState('personal');
+  const [yandexAccountType, setYandexAccountType] = useState(restoredSnapshot?.yandexAccountType ?? 'personal');
   const [lastFailure, setLastFailure] = useState({ code: null, count: 0 });
   // Set when a connect route answers 402 inbox_limit_reached. The client-side
   // `atInboxLimit` prop is computed from the inbox list this page loaded with,
@@ -650,7 +778,19 @@ export function ConnectModal({
   // prop would have shown, rather than printing the route's unlocalised
   // fallback sentence as a form error.
   const [serverLimit, setServerLimit] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
+  // A check still in flight from a modal that was closed shows as running here.
+  const [submitting, setSubmitting] = useState(restored?.kind === 'pending');
+  /** When the running check started, for the progress line. */
+  const [checkStartedAt, setCheckStartedAt] = useState(restored?.kind === 'pending' ? restored.startedAt : null);
+  /** Ticks once a second while a check runs, so the progress line can move on. */
+  const [checkNow, setCheckNow] = useState(() => Date.now());
+  /**
+   * What the last failure was about, for the fix table: the route's code,
+   * auth_reason, phase, host and relay flags. Cleared with the error.
+   */
+  const [failureContext, setFailureContext] = useState(null);
+  /** The client named on the "Now connect your AI app" screen. */
+  const [doneClient, setDoneClient] = useState(onboardingClient);
   const [formError, setFormError] = useState(null);
   /**
    * The fields the last failed submit was actually about.
@@ -751,6 +891,13 @@ export function ConnectModal({
    * exactly one rejection.
    */
   const [sessionExpired, setSessionExpired] = useState(false);
+  /**
+   * The route's failure code for the error on screen right now, for the
+   * "Contact support" link. Like `sessionExpired` (and unlike `lastFailure`,
+   * which outlives one rejection on purpose) it is cleared by `showError`, so a
+   * client-side validation message never carries an older route's code.
+   */
+  const [shownFailureCode, setShownFailureCode] = useState(null);
   // The exact secret we have already warned about the shape of.
   //
   // The shape rule is evidence, not a gate. It is right often enough to be
@@ -778,10 +925,14 @@ export function ConnectModal({
     // to submit. The ports are now on the form itself, always visible, so
     // opening the panel for one would open it to point at a field that is not
     // in it. Only the two things still inside can force it open.
+    // A receive-only or send-only inbox opens it too: the connection type is
+    // in the panel, and it is the reason half the form is missing.
+    const partial = reconnect?.connectionMode === 'imap' || reconnect?.connectionMode === 'smtp';
     return (
       imapSecurity !== 'tls' ||
       smtpSecurity !== GENERIC_IMAP_DEFAULTS.smtpSecurity ||
-      Boolean(reconnect?.username)
+      Boolean(reconnect?.username) ||
+      partial
     );
   });
   // Set when a port was lifted out of a host field, so the move is announced
@@ -906,7 +1057,14 @@ export function ConnectModal({
   // whether the cap was known up front (prop) or learned from a 402 (state).
   // The server's numbers win when present: they were counted at the moment of
   // the refusal, the prop's were counted at page load.
-  const showLimitPanel = atInboxLimit || serverLimit !== null;
+  //
+  // Step 3 is only reached by a connect that just succeeded in this modal. The
+  // parent adds that inbox to its list in onConnect, so on Free (cap 1) the
+  // prop flips to true while the user is on "Now connect your AI app". That is
+  // not an attempt to add a second inbox, and the panel must not replace the
+  // next step: about half of Free first connects saw it in November 2026.
+  const propAtLimit = atInboxLimit && step !== 3;
+  const showLimitPanel = propAtLimit || serverLimit !== null;
 
   // Record the panel being shown, once per modal-open. Both routes into it are
   // counted (the prop's up-front gate and the 402 fallback) because both put
@@ -915,7 +1073,7 @@ export function ConnectModal({
   // `plan_limit` failure of its own to join against. A reconnect never reaches
   // the panel and is excluded at the source rather than relied on to be
   // impossible.
-  useInboxPaywallView({ isReconnect, atInboxLimit, serverLimitReached: serverLimit !== null });
+  useInboxPaywallView({ isReconnect, atInboxLimit: propAtLimit, serverLimitReached: serverLimit !== null, entryPoint });
 
   const limitPlanName = serverLimit?.planName ?? planName;
   const limitInboxCount = serverLimit?.inboxCount ?? inboxCount;
@@ -930,7 +1088,15 @@ export function ConnectModal({
   // `businessShaped` only ever matters at the Free cap, where it widens the
   // offer from Personal alone to Personal and Pro side by side. The rule that
   // decides that is inboxCapOffer's, not this component's.
-  const upgradeCopy = inboxCapOffer(limitMaxInboxes, { businessShaped });
+  const upgradeCopy = inboxCapOffer(limitMaxInboxes, { businessShaped, seatPricing: Boolean(stripePrices?.pro?.perPerson) });
+  // The Business founder price swaps the $39 sentences for founder ones
+  // while it is open; every other offer keeps its own keys.
+  const capCopy = founderCapCopy(upgradeCopy, stripePrices);
+  // "Charged today. Cancel any time. 14-day refund." only at the Free cap:
+  // there the buy button opens a new subscription. Above it (Personal or Pro
+  // at their cap) the account usually already pays, the click becomes an
+  // in-place plan change, and the 14-day refund does not cover that.
+  const limitIsNewPurchase = (limitMaxInboxes ?? 1) <= 1;
 
   // MONTHLY, deliberately, and it stays monthly unless the person picks
   // otherwise. This panel used to have no interval at all and always bought
@@ -1268,6 +1434,8 @@ export function ConnectModal({
     // failure, which may be a hostname.
     setAuthReason(null);
     setSessionExpired(false);
+    setShownFailureCode(null);
+    setFailureContext(null);
   };
 
   /**
@@ -1369,11 +1537,12 @@ export function ConnectModal({
    * is valuable.
    */
   const recordProviderSelected = (chosen) => {
-    trackProductEvent('inbox_connect_started', { provider: chosen === 'generic' ? 'imap' : chosen });
+    const entry = parseConnectEntryPoint(entryPoint);
+    trackProductEvent('inbox_connect_started', { provider: chosen === 'generic' ? 'imap' : chosen, entry_point: entry ?? 'other' });
     try {
       fetch('/api/onboarding', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'provider_selected', provider: chosen === 'generic' ? 'generic_imap' : chosen }),
+        body: JSON.stringify({ action: 'provider_selected', provider: chosen === 'generic' ? 'generic_imap' : chosen, ...(entry ? { entry_point: entry } : {}) }),
         keepalive: true,
       }).catch(() => { /* the connection remains available if analytics is unavailable */ });
     } catch { /* the connection remains available if analytics is unavailable */ }
@@ -1469,6 +1638,82 @@ export function ConnectModal({
     providerLabel: appPasswordProvider,
   });
 
+  /**
+   * The fix table's input for one failure (lib/email/auth-failure-help.ts
+   * connectFix): the route's code, reason, phase, host and relay flags, and
+   * what is typed in the form now. Never the password.
+   */
+  const fixInputFor = context => ({
+    card: provider,
+    errorCode: context?.code ?? null,
+    reason: context?.reason ?? null,
+    phase: context?.phase ?? null,
+    host: context?.host ?? null,
+    email: form.email,
+    username: isGeneric ? form.username : null,
+    imapHost: isGeneric ? form.imapHost : null,
+    smtpHost: isGeneric ? form.smtpHost : null,
+    relayFailed: context?.relayFailed === true,
+    imapOk: context?.imapOk === true,
+    connectionMode: isGeneric ? connectionMode : null,
+    providerLabel: appPasswordProvider,
+  });
+  /** The one fix block under the error, or null. */
+  const fix = failureContext ? connectFix(fixInputFor(failureContext)) : null;
+  const fixEventFields = fix
+    ? { provider: fix.analyticsProvider, authReason: failureContext?.reason ?? null, phase: failureContext?.phase ?? null }
+    : null;
+
+  // connect_fix_shown, once per failure that renders a fix (errorSeq moves on
+  // every failure, including a repeat of the same one).
+  const fixShownForSeq = useRef(null);
+  const fixRow = fix?.row ?? null;
+  useEffect(() => {
+    if (!fixRow || !fixEventFields || fixShownForSeq.current === errorSeq) return;
+    fixShownForSeq.current = errorSeq;
+    recordActivationEvent('connect_fix_shown', fixEventFields);
+    // fixEventFields is derived from the same failure as fixRow and errorSeq.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixRow, errorSeq]);
+
+  const onFixLinkClick = () => {
+    if (fixEventFields) recordActivationEvent('connect_fix_link_clicked', fixEventFields);
+  };
+
+  // The progress line moves on while a check runs; see `checkProgressKey`.
+  useEffect(() => {
+    if (!submitting) return undefined;
+    const id = window.setInterval(() => setCheckNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [submitting]);
+
+  /**
+   * Pick up a check from a modal that was closed while it ran (checkMemory).
+   * A kept failure is shown as if it had just come back; a check still in
+   * flight registers this modal to receive its answer. State is written from
+   * a timer or the callback, never in the effect body.
+   */
+  const handleCheckResultRef = useRef(null);
+  useEffect(() => {
+    if (!restored) return undefined;
+    if (restored.kind === 'outcome') {
+      checkMemory.outcome = null;
+      const id = window.setTimeout(() => handleCheckResultRef.current?.(restored.result, restored.email), 0);
+      return () => window.clearTimeout(id);
+    }
+    const listener = (result, email) => {
+      if (checkMemory.listener === listener) checkMemory.listener = null;
+      if (!mountedRef.current) return;
+      setSubmitting(false);
+      setCheckStartedAt(null);
+      handleCheckResultRef.current?.(result, email);
+    };
+    checkMemory.listener = listener;
+    return () => {
+      if (checkMemory.listener === listener) checkMemory.listener = null;
+    };
+  }, [restored]);
+
   // ── The notices, as text ───────────────────────────────────────────────────
   // Computed once, here, rather than inline in the JSX, because each of them is
   // needed twice: once for the span the user reads and once for the announcer
@@ -1515,7 +1760,13 @@ export function ConnectModal({
 
   // ── Step 2: credentials submission ─────────────────────────────────────────
 
-  const handleAppPasswordSubmit = async () => {
+  /**
+   * `overrides.mode` lets "Connect for reading only" submit as receive-only in
+   * the same click, before the mode change has rendered. Called from an
+   * onClick it receives the click event, which has no `mode`.
+   */
+  const handleAppPasswordSubmit = async (overrides) => {
+    const submitMode = typeof overrides?.mode === 'string' ? overrides.mode : connectionMode;
     showError(null);
 
     const email = form.email.trim().toLowerCase();
@@ -1531,8 +1782,14 @@ export function ConnectModal({
     // spaces out of it is as right there as on the branded card. A generic
     // mailbox we cannot identify keeps its whitespace: that value is a real
     // account password and a space in it may well be deliberate.
+    // The generated tokens of the providers the fix table names (AOL, QQ,
+    // Mail.ru, Infomaniak) get the same treatment once the address or host
+    // identifies one.
+    const generatedToken = isGeneric && GENERATED_TOKEN_PRESETS.has(
+      findMailHostPreset({ email: form.email, host: form.imapHost })?.id ?? ''
+    );
     const appPassword =
-      isGeneric && !activePolicy?.requiresAppPassword
+      isGeneric && !activePolicy?.requiresAppPassword && !generatedToken
         ? form.password.trim()
         : normalizeAppPassword(form.password);
 
@@ -1575,13 +1832,18 @@ export function ConnectModal({
       // Digits that cannot be used as a port were just stripped off a host
       // field. Submitting anyway would connect on the default port, which is
       // not what the user asked for, so stop and say which ports are accepted.
-      if (imapParsed.portRejected || smtpParsed.portRejected) {
+      const withImap = submitMode !== 'smtp';
+      const withSmtp = submitMode !== 'imap';
+      // A half the connection type leaves out is neither checked nor sent: its
+      // fields are hidden, and anything still in them was typed before the
+      // user switched type.
+      if ((withImap && imapParsed.portRejected) || (withSmtp && smtpParsed.portRejected)) {
         // The offending text is in the HOST box, which is where the digits were
         // typed and where they have just been stripped from, so that is the
         // field the message is about and the field focus goes to.
         failValidation(
           tr('connect.errorPortRange'),
-          [imapParsed.portRejected ? 'imapHost' : null, smtpParsed.portRejected ? 'smtpHost' : null].filter(Boolean)
+          [withImap && imapParsed.portRejected ? 'imapHost' : null, withSmtp && smtpParsed.portRejected ? 'smtpHost' : null].filter(Boolean)
         );
         return;
       }
@@ -1589,21 +1851,22 @@ export function ConnectModal({
       const smtpHost = smtpParsed.host.toLowerCase();
       const imapPort = Number(imapParsed.port ?? form.imapPort);
       const smtpPort = Number(smtpParsed.port ?? form.smtpPort);
-      if (!imapHost || !smtpHost) {
+      if ((withImap && !imapHost) || (withSmtp && !smtpHost)) {
         // "IMAP and SMTP host are required" names two fields, so both are
         // marked; focus goes to the first one that is actually empty rather
         // than always to the IMAP box, which would move the cursor away from
-        // the field the user still has to fill.
+        // the field the user still has to fill. A one-sided connection names
+        // only the field it has.
         failValidation(
-          tr('connect.errorHostRequired'),
-          [!imapHost ? 'imapHost' : null, !smtpHost ? 'smtpHost' : null].filter(Boolean)
+          tr(withImap && withSmtp ? 'connect.errorHostRequired' : withImap ? 'connect.errorImapHostRequired' : 'connect.errorSmtpHostRequired'),
+          [withImap && !imapHost ? 'imapHost' : null, withSmtp && !smtpHost ? 'smtpHost' : null].filter(Boolean)
         );
         return;
       }
-      if (!imapPort || !smtpPort) {
+      if ((withImap && !imapPort) || (withSmtp && !smtpPort)) {
         failValidation(
-          tr('connect.errorPortRequired'),
-          [!imapPort ? 'imapPort' : null, !smtpPort ? 'smtpPort' : null].filter(Boolean)
+          tr(withImap && withSmtp ? 'connect.errorPortRequired' : withImap ? 'connect.errorImapPortRequired' : 'connect.errorSmtpPortRequired'),
+          [withImap && !imapPort ? 'imapPort' : null, withSmtp && !smtpPort ? 'smtpPort' : null].filter(Boolean)
         );
         return;
       }
@@ -1617,7 +1880,9 @@ export function ConnectModal({
       // sent with implicit TLS and fail the handshake.
       const imapSecurity = (imapParsed.port !== null ? securityForPort('imap', imapPort) : null) ?? form.imapSecurity;
       const smtpSecurity = (smtpParsed.port !== null ? securityForPort('smtp', smtpPort) : null) ?? form.smtpSecurity;
-      body = { email, username, appPassword, imapHost, imapPort, smtpHost, smtpPort, imapSecurity, smtpSecurity };
+      body = { email, username, appPassword, mode: submitMode };
+      if (withImap) Object.assign(body, { imapHost, imapPort, imapSecurity });
+      if (withSmtp) Object.assign(body, { smtpHost, smtpPort, smtpSecurity });
     }
 
     // Last gate before the network call, and deliberately last: a missing host
@@ -1639,6 +1904,7 @@ export function ConnectModal({
       shapeWarnedFor.current = appPassword;
       const shapeReason = shape.problem === 'account_password' ? 'account_password_used' : 'app_password_length';
       setAuthReason(shapeReason);
+      setShownFailureCode(null); // a client-side warning, no route code
       setFormError(tr(AUTH_REASON_HEADLINE_KEYS[shapeReason], { provider: appPasswordProvider }));
       // The objection is about one field and one value, so say which. Focus is
       // deliberately NOT stolen here: the whole point of this warning is that
@@ -1655,15 +1921,67 @@ export function ConnectModal({
       return;
     }
 
+    // Kept for the next modal if this one is closed mid-check (checkMemory).
+    // Never the password. A reconnect is not kept: it reopens from its row.
+    const startedAt = Date.now();
+    const snapshot = isReconnect
+      ? null
+      : {
+          provider,
+          connectionMode: submitMode,
+          form: { ...form, password: '' },
+          zohoRegion,
+          zohoAccountType,
+          yandexLogin,
+          yandexAccountType,
+        };
+    if (snapshot) {
+      checkMemory.pending = { snapshot, startedAt };
+      checkMemory.outcome = null;
+    }
     setSubmitting(true);
+    setCheckStartedAt(startedAt);
+    setCheckNow(startedAt);
+    let result;
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-
       const data = await response.json();
+      result = { ok: response.ok, status: response.status, data };
+    } catch {
+      result = { network: true };
+    }
+    if (snapshot && checkMemory.pending?.snapshot === snapshot) checkMemory.pending = null;
+
+    if (mountedRef.current) {
+      setSubmitting(false);
+      setCheckStartedAt(null);
+      handleCheckResult(result, email);
+      return;
+    }
+    // Closed mid-check, and a new modal is open waiting for this answer.
+    if (snapshot && checkMemory.listener) {
+      checkMemory.listener(result, email);
+      return;
+    }
+    // Closed and not reopened: the toast (and onConnect) below, and the
+    // failure kept for the next open.
+    handleCheckResult(result, email);
+    if (snapshot && !result.ok) checkMemory.outcome = { snapshot, result, email, at: Date.now() };
+  };
+
+  /**
+   * Turn one connect answer into what the user sees. Called by the modal that
+   * sent it, or by a newer modal that picked the check up (checkMemory).
+   */
+  const handleCheckResult = (result, email) => {
+    try {
+      if (result.network) throw new Error('network');
+      const data = result.data ?? {};
+      const response = { ok: result.ok, status: result.status };
 
       if (!response.ok) {
         // A plan cap is not a credential problem. Rendering `data.error` here
@@ -1731,7 +2049,20 @@ export function ConnectModal({
 
         setLastFailure({ code, count });
         setAuthReason(reason);
+        const context = {
+          code,
+          reason: typeof data.auth_reason === 'string' ? data.auth_reason : null,
+          phase: typeof data.phase === 'string' ? data.phase : null,
+          host: typeof data.host === 'string' ? data.host : null,
+          relayFailed: data.relay_failed === true,
+          imapOk: data.imap_ok === true,
+        };
+        setFailureContext(context);
+        // The row the panel will show, decided here as well so the password
+        // field is cleared only when the password is the thing to replace.
+        const nextFix = connectFix(fixInputFor(context));
         setSessionExpired(code === SESSION_EXPIRED_CODE);
+        setShownFailureCode(code);
         setFormError(headline);
         // A rejected credential is about the password box; a login name the
         // server did not recognise is about the username box. Every other code
@@ -1741,9 +2072,13 @@ export function ConnectModal({
         setInvalidFields(
           reason === 'login_username_required'
             ? ['username']
-            : code === 'auth_failed'
-              ? ['password']
-              : []
+            : reason === 'provider_refused_signin'
+              // The provider refused the sign-in, not the password. Marking the
+              // password box invalid would ask for an edit that cannot help.
+              ? []
+              : code === 'auth_failed'
+                ? ['password']
+                : []
         );
         bumpErrorSeq();
         setErrorDetail(detail);
@@ -1787,7 +2122,15 @@ export function ConnectModal({
         // rather than edited, so hand the field back ready to overwrite. Only
         // for auth failures: stealing focus when the fix is a host or a port
         // would move the user away from the field they need.
-        if (code === 'auth_failed' && passwordRef.current) {
+        if (nextFix?.passwordProblem) {
+          // The fix row says the password is the problem (an account password
+          // where an app password belongs, or a plain rejection): clear only
+          // that field and put the cursor in it, ready for the new one. Every
+          // other field keeps what was typed, so "Test again" re-sends it.
+          setForm(f => ({ ...f, password: '' }));
+          shapeWarnedFor.current = null;
+          if (passwordRef.current) passwordRef.current.focus();
+        } else if (code === 'auth_failed' && reason !== 'provider_refused_signin' && passwordRef.current) {
           // Arm the one-shot select first: taking focus fires the focus
           // handler, which spends the flag, so the contents are selected
           // exactly once per rejection and never on an ordinary click-back.
@@ -1847,13 +2190,32 @@ export function ConnectModal({
       // inbox list and the success toast, and it is still on screen either way:
       // a connection that succeeded after the user walked away is still a
       // connection, and the row has to appear.
+      // A first inbox ends on "Now connect your AI app" rather than a bare
+      // list, so the modal stays open (keepOpen) and moves to step 3. Only
+      // when it is still on screen: a check that lands after the modal closed
+      // behaves as before.
+      const keepOpen = Boolean(showNextStepAfterConnect) && mountedRef.current;
+      checkMemory.outcome = null;
       onConnect({
         provider: optimisticProvider,
         address: email,
         label: optimisticLabel,
         connectionMethod,
         transport,
+        keepOpen,
       });
+      if (keepOpen) {
+        showError(null);
+        setStep(3);
+        if (!doneClient) {
+          fetch('/api/onboarding', { headers: { Accept: 'application/json' } })
+            .then(res => (res.ok ? res.json() : null))
+            .then(row => {
+              if (mountedRef.current && typeof row?.onboarding_client === 'string') setDoneClient(row.onboarding_client);
+            })
+            .catch(() => { /* the screen works without a named client */ });
+        }
+      }
     } catch {
       // A dropped connection or an aborted request. Same rule as above: say so
       // where the user can see it, wherever that now is.
@@ -1865,9 +2227,52 @@ export function ConnectModal({
           variant: 'error',
         });
       }
-    } finally {
-      if (mountedRef.current) setSubmitting(false);
     }
+  };
+
+  useEffect(() => {
+    handleCheckResultRef.current = handleCheckResult;
+  });
+
+  /**
+   * What the progress line says while a check runs.
+   *
+   * The browser cannot see which half the server is on, so this follows the
+   * order the routes check in (login, then sending) on a clock: an IMAP login
+   * answers in a few seconds when it answers at all, so after six seconds the
+   * check is most likely on the sending half. Past 25 seconds it says the
+   * check is slow rather than guessing further. A receive-only connection has
+   * no sending step, and a send-only one has no login step of its own here.
+   */
+  const checkElapsed = submitting && checkStartedAt ? Math.max(0, checkNow - checkStartedAt) : 0;
+  const checksLogin = !(isGeneric && connectionMode === 'smtp');
+  const checksSending = !(isGeneric && connectionMode === 'imap');
+  const checkProgressKey = checkElapsed >= 25000
+    ? 'connect.fix.progressSlow'
+    : checksSending && (!checksLogin || checkElapsed >= 6000)
+      ? 'connect.fix.progressSending'
+      : 'connect.fix.progressLogin';
+
+  /** "Use imap.example.com": put the documented servers in, then Test again. */
+  const applySuggestedHost = () => {
+    const suggestion = fix?.suggestedHost;
+    if (!suggestion) return;
+    setForm(f => ({
+      ...f,
+      imapHost: suggestion.imapHost,
+      imapPort: suggestion.imapPort,
+      imapSecurity: suggestion.imapSecurity,
+      smtpHost: suggestion.smtpHost,
+      smtpPort: suggestion.smtpPort,
+      smtpSecurity: suggestion.smtpSecurity,
+    }));
+  };
+
+  /** "Connect for reading only": switch the type and test again in one click. */
+  const connectReadOnly = () => {
+    setConnectionMode('imap');
+    setAdvancedOpen(true);
+    handleAppPasswordSubmit({ mode: 'imap' });
   };
 
   const handleBackToProviders = () => {
@@ -2123,6 +2528,9 @@ export function ConnectModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="cm-title"
+        // Which control opened this modal (closed list). Read by the UI tests
+        // and by anyone inspecting a session; it changes nothing on screen.
+        data-connect-entry={parseConnectEntryPoint(entryPoint) ?? undefined}
         // Focus target on open, so the dialog is announced and Escape works
         // from the provider step, which autofocuses nothing.
         tabIndex={-1}
@@ -2168,7 +2576,9 @@ export function ConnectModal({
                   ? tr('connect.titleLimitReached')
                   : isReconnect
                     ? tr('connect.titleReconnectProvider', { provider: providerLabel() })
-                    : step === 2
+                    : step === 3
+                      ? tr('connect.fix.done.title')
+                      : step === 2
                       ? tr('connect.titleConnectProvider', { provider: providerLabel() })
                       : tr('connect.titleConnectInbox')}
               </h2>
@@ -2177,6 +2587,10 @@ export function ConnectModal({
                   ? (typeof limitInboxCount === 'number' && typeof limitMaxInboxes === 'number'
                       ? tr('connect.subLimitReached', { plan: limitPlanName, count: limitInboxCount, max: limitMaxInboxes })
                       : tr('connect.subLimitReachedNoCount', { plan: limitPlanName }))
+                  : step === 3
+                    ? (CLIENT_NAMES[doneClient]
+                        ? tr('connect.fix.done.bodyClient', { client: CLIENT_NAMES[doneClient] })
+                        : tr('connect.fix.done.body'))
                   : step === 1
                     ? tr('connect.subChooseProvider')
                     : isGeneric
@@ -2270,8 +2684,12 @@ export function ConnectModal({
                     color: 'var(--fg-3)',
                     lineHeight: 1.5,
                   }}>
-                    {tr(upgradeCopy.bodyKey)}
+                    {tr(capCopy.bodyKey)}
                   </div>
+                  {!upgradeCopy.dual && (
+                    <ProPriceAppNotice plans={[upgradeCopy.plan]} style={{ marginTop: 6 }} />
+                  )}
+                  <FounderPriceNote founder={capCopy.founder} />
                 </div>
               </div>
 
@@ -2376,9 +2794,13 @@ export function ConnectModal({
                               when one pitch wraps to more lines than the
                               other. */}
                           <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 4 }}>
+                            <ProPriceAppNotice plans={[o.plan]} />
                             {/* What the annual button actually charges, said
                                 before the click, per plan. */}
-                            {upgradeInterval === 'year' && planAnnual && (
+                            {upgradeInterval === 'year' && planAnnual?.firstYear && (
+                              <SeasonalOfferNote offer={planAnnual.firstYear} size="sm" />
+                            )}
+                            {upgradeInterval === 'year' && planAnnual && !planAnnual.firstYear && (
                               <div style={{
                                 fontFamily: 'var(--font-sans)',
                                 fontSize: 11.5,
@@ -2451,6 +2873,15 @@ export function ConnectModal({
                   onChange={setUpgradeInterval}
                 />
               )}
+
+              {/* Said once for the whole panel, just above the footer's buy
+                  button (or under the two plan cards). */}
+              {limitIsNewPurchase && (
+                <CheckoutReassurance
+                  locale={appLocale}
+                  align={upgradeCopy.dual ? 'center' : 'left'}
+                />
+              )}
             </div>
           )}
 
@@ -2484,11 +2915,13 @@ export function ConnectModal({
                   The app password above is the default because OAuth here has
                   a hard ceiling: an unverified Google app may only ever be
                   granted consent by 100 accounts in its lifetime, the counter
-                  cannot be reset, and 71 of those are already spent. Removing
-                  OAuth would strand the people who prefer it and the 56
-                  inboxes already connected that way, so it stays, one click
-                  down, with the walkthrough of Google's screens intact. */}
-              {provider === 'gmail' && (
+                  cannot be reset, and 95 of those were already spent on
+                  2026-10-26. Since then it is offered only on Pro and Business,
+                  and hidden for everyone once fewer than 5 slots remain
+                  (`gmailOauthAllowed`, src/lib/oauth/gmail-oauth-gate.ts).
+                  Inboxes already connected this way keep working and
+                  reconnect from the Inboxes page. */}
+              {provider === 'gmail' && gmailOauthAllowed && (
                 <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-1)' }}>
                   <button
                     type="button"
@@ -2658,6 +3091,57 @@ export function ConnectModal({
                   is offered here as well as in the toast after a refusal, so
                   someone who already knows their tenant needs it can send it
                   before trying. */}
+              {/* Back from Microsoft's consent screen with "cancelled". Said
+                  plainly, with the retry right here, instead of a toast. */}
+              {provider === 'outlook' && returnNotice === 'outlook_cancelled' && (
+                <div
+                  role="status"
+                  className="cm-outlook-cancelled"
+                  style={{
+                    marginTop: 16,
+                    padding: '10px 12px',
+                    background: 'var(--bg-sunken)',
+                    border: '1px solid var(--border-1)',
+                    borderRadius: 8,
+                    fontFamily: 'var(--font-sans)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-1)' }}>{tr('connect.fix.outlookCancelled.title')}</span>
+                  <span style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--fg-2)' }}>{tr('connect.fix.outlookCancelled.body')}</span>
+                  <div>
+                    <Btn variant="secondary" size="sm" icon="refresh" onClick={handleConnect} className="cm-outlook-try-again">
+                      {tr('connect.fix.outlookCancelled.tryAgain')}
+                    </Btn>
+                  </div>
+                </div>
+              )}
+
+              {/* What Microsoft's consent screen will ask, before the
+                  redirect, so the screen is expected rather than alarming. */}
+              {provider === 'outlook' && (
+                <ul
+                  className="cm-outlook-consent"
+                  style={{
+                    margin: '12px 0 0',
+                    paddingLeft: 18,
+                    fontFamily: 'var(--font-sans)',
+                    fontSize: 12,
+                    color: 'var(--fg-2)',
+                    lineHeight: 1.5,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                  }}
+                >
+                  <li>{tr('connect.fix.outlookConsent.line1')}</li>
+                  <li>{tr('connect.fix.outlookConsent.line2')}</li>
+                  <li>{tr('connect.fix.outlookConsent.line3')}</li>
+                </ul>
+              )}
+
               {provider === 'outlook' && (
                 <p style={{
                   margin: '12px 0 0',
@@ -2952,124 +3436,144 @@ export function ConnectModal({
                   rare: the security modes and the separate login username. */}
               {isGeneric && (
                 <>
-                  <div className="host-port-row">
-                    <div className="field host-field">
-                      <label htmlFor="cm-imap-host">{tr('connect.imapHostLabel')}</label>
-                      <input
-                        id="cm-imap-host"
-                        ref={bindField('imapHost')}
-                        className="input"
-                        type="text"
-                        placeholder="imap.example.com"
-                        required
-                        aria-required="true"
-                        aria-invalid={isInvalid('imapHost') || undefined}
-                        // The paste hint and the two notices below belong to
-                        // this pair of controls but render outside the field
-                        // (see the comment on the hint), so the association has
-                        // to be made by id: without it, tabbing here announced
-                        // "IMAP host, edit text" and nothing else.
-                        aria-describedby={describedBy(
-                          'cm-host-paste-hint',
-                          portRangeError === 'imap' ? 'cm-imap-port-error' : null,
-                          isInvalid('imapHost') ? 'cm-form-error' : null
-                        )}
-                        value={form.imapHost}
-                        onChange={e => { setPortNote(null); setPortRangeError(null); setForm(prev => ({ ...prev, imapHost: e.target.value })); }}
-                        onBlur={() => normalizeHostField('imap')}
-                        readOnly={isReconnect}
-                        aria-readonly={isReconnect || undefined}
-                      />
-                    </div>
-                    <div className="field port-field">
-                      <label htmlFor="cm-imap-port">{tr('connect.imapPortLabel')}</label>
-                      <PortSelect
-                        id="cm-imap-port"
-                        inputRef={bindField('imapPort')}
-                        protocol="imap"
-                        value={form.imapPort}
-                        onChange={value => setPort('imap', value)}
-                        disabled={isReconnect}
-                        invalid={isInvalid('imapPort')}
-                        describedBy={describedBy(
-                          portNote?.protocol === 'imap' ? 'cm-imap-port-note' : null,
-                          isInvalid('imapPort') ? 'cm-form-error' : null
-                        )}
-                      />
-                    </div>
-                  </div>
-                  {/* The hints belong to the row, not to the host box: with the
-                      port beside it, a hint nested inside the host field would
-                      be indented under a column rather than under the pair it
-                      describes. */}
-                  <span id="cm-host-paste-hint" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--fg-3)', marginTop: -6 }}>
-                    {tr('connect.hostPasteHint')}
-                  </span>
-                  {/* Neither of these carries a live role any longer: both were
-                      spans that arrive with their own text, which is the case
-                      that does not announce. The dialog's persistent announcers
-                      say them; the ids are what tie them to the controls. */}
-                  {portNote?.protocol === 'imap' && (
-                    <span id="cm-imap-port-note" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--brand)', marginTop: -6 }}>
-                      {portMovedNote}
-                    </span>
-                  )}
-                  {portRangeError === 'imap' && (
-                    <span id="cm-imap-port-error" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--red-700)', marginTop: -6 }}>
-                      {portRangeNote}
-                    </span>
+                  {connectionMode !== 'smtp' && (
+                    <>
+                      <div className="host-port-row">
+                        <div className="field host-field">
+                          <label htmlFor="cm-imap-host">{tr('connect.imapHostLabel')}</label>
+                          <input
+                            id="cm-imap-host"
+                            ref={bindField('imapHost')}
+                            className="input"
+                            type="text"
+                            // See NOT_A_LOGIN_FIELD. The SMTP host is the text box
+                            // directly above the password, which is where a password
+                            // manager looks for "the username" of this site's login,
+                            // and it was once submitted holding mcpemails.com.
+                            {...NOT_A_LOGIN_FIELD}
+                            name="mcpe-imap-server"
+                            placeholder="imap.example.com"
+                            required
+                            aria-required="true"
+                            aria-invalid={isInvalid('imapHost') || undefined}
+                            // The paste hint and the two notices below belong to
+                            // this pair of controls but render outside the field
+                            // (see the comment on the hint), so the association has
+                            // to be made by id: without it, tabbing here announced
+                            // "IMAP host, edit text" and nothing else.
+                            aria-describedby={describedBy(
+                              'cm-host-paste-hint',
+                              portRangeError === 'imap' ? 'cm-imap-port-error' : null,
+                              isInvalid('imapHost') ? 'cm-form-error' : null
+                            )}
+                            value={form.imapHost}
+                            onChange={e => { setPortNote(null); setPortRangeError(null); setForm(prev => ({ ...prev, imapHost: e.target.value })); }}
+                            onBlur={() => normalizeHostField('imap')}
+                            readOnly={isReconnect}
+                            aria-readonly={isReconnect || undefined}
+                          />
+                        </div>
+                        <div className="field port-field">
+                          <label htmlFor="cm-imap-port">{tr('connect.imapPortLabel')}</label>
+                          <PortSelect
+                            id="cm-imap-port"
+                            inputRef={bindField('imapPort')}
+                            protocol="imap"
+                            value={form.imapPort}
+                            onChange={value => setPort('imap', value)}
+                            disabled={isReconnect}
+                            invalid={isInvalid('imapPort')}
+                            describedBy={describedBy(
+                              portNote?.protocol === 'imap' ? 'cm-imap-port-note' : null,
+                              isInvalid('imapPort') ? 'cm-form-error' : null
+                            )}
+                          />
+                        </div>
+                      </div>
+                      {/* The hints belong to the row, not to the host box: with the
+                          port beside it, a hint nested inside the host field would
+                          be indented under a column rather than under the pair it
+                          describes. */}
+                      <span id="cm-host-paste-hint" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--fg-3)', marginTop: -6 }}>
+                        {tr('connect.hostPasteHint')}
+                      </span>
+                      {/* Neither of these carries a live role any longer: both were
+                          spans that arrive with their own text, which is the case
+                          that does not announce. The dialog's persistent announcers
+                          say them; the ids are what tie them to the controls. */}
+                      {portNote?.protocol === 'imap' && (
+                        <span id="cm-imap-port-note" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--brand)', marginTop: -6 }}>
+                          {portMovedNote}
+                        </span>
+                      )}
+                      {portRangeError === 'imap' && (
+                        <span id="cm-imap-port-error" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--red-700)', marginTop: -6 }}>
+                          {portRangeNote}
+                        </span>
+                      )}
+                    </>
                   )}
 
-                  <div className="host-port-row">
-                    <div className="field host-field">
-                      <label htmlFor="cm-smtp-host">{tr('connect.smtpHostLabel')}</label>
-                      <input
-                        id="cm-smtp-host"
-                        ref={bindField('smtpHost')}
-                        className="input"
-                        type="text"
-                        placeholder="smtp.example.com"
-                        required
-                        aria-required="true"
-                        aria-invalid={isInvalid('smtpHost') || undefined}
-                        aria-describedby={describedBy(
-                          'cm-host-paste-hint',
-                          portRangeError === 'smtp' ? 'cm-smtp-port-error' : null,
-                          isInvalid('smtpHost') ? 'cm-form-error' : null
-                        )}
-                        value={form.smtpHost}
-                        onChange={e => { setPortNote(null); setPortRangeError(null); setForm(prev => ({ ...prev, smtpHost: e.target.value })); }}
-                        onBlur={() => normalizeHostField('smtp')}
-                        readOnly={isReconnect}
-                        aria-readonly={isReconnect || undefined}
-                      />
-                    </div>
-                    <div className="field port-field">
-                      <label htmlFor="cm-smtp-port">{tr('connect.smtpPortLabel')}</label>
-                      <PortSelect
-                        id="cm-smtp-port"
-                        inputRef={bindField('smtpPort')}
-                        protocol="smtp"
-                        value={form.smtpPort}
-                        onChange={value => setPort('smtp', value)}
-                        disabled={isReconnect}
-                        invalid={isInvalid('smtpPort')}
-                        describedBy={describedBy(
-                          portNote?.protocol === 'smtp' ? 'cm-smtp-port-note' : null,
-                          isInvalid('smtpPort') ? 'cm-form-error' : null
-                        )}
-                      />
-                    </div>
-                  </div>
-                  {portNote?.protocol === 'smtp' && (
-                    <span id="cm-smtp-port-note" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--brand)', marginTop: -6 }}>
-                      {portMovedNote}
-                    </span>
-                  )}
-                  {portRangeError === 'smtp' && (
-                    <span id="cm-smtp-port-error" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--red-700)', marginTop: -6 }}>
-                      {portRangeNote}
-                    </span>
+                  {connectionMode !== 'imap' && (
+                    <>
+                      <div className="host-port-row">
+                        <div className="field host-field">
+                          <label htmlFor="cm-smtp-host">{tr('connect.smtpHostLabel')}</label>
+                          <input
+                            id="cm-smtp-host"
+                            ref={bindField('smtpHost')}
+                            className="input"
+                            type="text"
+                            // See NOT_A_LOGIN_FIELD. The SMTP host is the text box
+                            // directly above the password, which is where a password
+                            // manager looks for "the username" of this site's login,
+                            // and it was once submitted holding mcpemails.com.
+                            {...NOT_A_LOGIN_FIELD}
+                            name="mcpe-smtp-server"
+                            placeholder="smtp.example.com"
+                            required
+                            aria-required="true"
+                            aria-invalid={isInvalid('smtpHost') || undefined}
+                            aria-describedby={describedBy(
+                              'cm-host-paste-hint',
+                              portRangeError === 'smtp' ? 'cm-smtp-port-error' : null,
+                              isInvalid('smtpHost') ? 'cm-form-error' : null
+                            )}
+                            value={form.smtpHost}
+                            onChange={e => { setPortNote(null); setPortRangeError(null); setForm(prev => ({ ...prev, smtpHost: e.target.value })); }}
+                            onBlur={() => normalizeHostField('smtp')}
+                            readOnly={isReconnect}
+                            aria-readonly={isReconnect || undefined}
+                          />
+                        </div>
+                        <div className="field port-field">
+                          <label htmlFor="cm-smtp-port">{tr('connect.smtpPortLabel')}</label>
+                          <PortSelect
+                            id="cm-smtp-port"
+                            inputRef={bindField('smtpPort')}
+                            protocol="smtp"
+                            value={form.smtpPort}
+                            onChange={value => setPort('smtp', value)}
+                            disabled={isReconnect}
+                            invalid={isInvalid('smtpPort')}
+                            describedBy={describedBy(
+                              portNote?.protocol === 'smtp' ? 'cm-smtp-port-note' : null,
+                              isInvalid('smtpPort') ? 'cm-form-error' : null
+                            )}
+                          />
+                        </div>
+                      </div>
+                      {portNote?.protocol === 'smtp' && (
+                        <span id="cm-smtp-port-note" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--brand)', marginTop: -6 }}>
+                          {portMovedNote}
+                        </span>
+                      )}
+                      {portRangeError === 'smtp' && (
+                        <span id="cm-smtp-port-error" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--red-700)', marginTop: -6 }}>
+                          {portRangeNote}
+                        </span>
+                      )}
+                    </>
                   )}
                 </>
               )}
@@ -3268,8 +3772,8 @@ export function ConnectModal({
 
               {/* ── Advanced settings (generic IMAP only) ──────────────────
                   What is left in here after the ports moved up to the host
-                  rows: the two transport security modes and the optional login
-                  username.
+                  rows: the connection type, the two transport security modes
+                  and the optional login username.
 
                   Closed by default, but opened automatically whenever it holds
                   a value that differs from the default, and whenever a failure
@@ -3322,6 +3826,32 @@ export function ConnectModal({
                         {tr('connect.advancedHint')}
                       </span>
 
+                      {/* Connection type. Most mailboxes are both, and the form
+                          opens that way, which is why the choice lives in here
+                          and not on the form itself. A receive-only mailbox has
+                          no SMTP server to give and a send-only one (a
+                          transactional sender, a relay account) has no IMAP
+                          server; choosing one hides the other half's host row
+                          above, so nobody is asked for a server they do not have. */}
+                      <div className="field">
+                        <label htmlFor="cm-connection-mode">{tr('connect.connectionModeLabel')}</label>
+                        <select
+                          id="cm-connection-mode"
+                          className="input"
+                          value={connectionMode}
+                          onChange={e => { setPortNote(null); setPortRangeError(null); setConnectionMode(e.target.value); }}
+                          disabled={isReconnect}
+                          aria-describedby="cm-connection-mode-hint"
+                        >
+                          <option value="both">{tr('connect.connectionModeBoth')}</option>
+                          <option value="imap">{tr('connect.connectionModeImap')}</option>
+                          <option value="smtp">{tr('connect.connectionModeSmtp')}</option>
+                        </select>
+                        <span id="cm-connection-mode-hint" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--fg-3)' }}>
+                          {tr(connectionMode === 'imap' ? 'connect.connectionModeImapHint' : connectionMode === 'smtp' ? 'connect.connectionModeSmtpHint' : 'connect.connectionModeBothHint')}
+                        </span>
+                      </div>
+
                       <div className="field">
                         <label htmlFor="cm-username">{tr('connect.usernameLabel')}</label>
                         <input
@@ -3360,37 +3890,41 @@ export function ConnectModal({
                           the form with nothing saying which half either
                           governed, and losing the legends when the ports moved
                           out to the host rows would put that ambiguity back. */}
-                      <fieldset style={{ border: '1px solid var(--border-1)', borderRadius: 8, padding: 12, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <legend style={{ fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600, color: 'var(--fg-2)', padding: '0 6px' }}>
-                          {tr('connect.imapSectionLabel')}
-                        </legend>
-                        <div className="field">
-                          <label htmlFor="cm-imap-security">{tr('connect.imapSecurityLabel')}</label>
-                          <select id="cm-imap-security" className="input" value={form.imapSecurity} onChange={e => setSecurity('imap', e.target.value)} disabled={isReconnect} aria-describedby="cm-imap-security-hint">
-                            <option value="tls">{tr('connect.securityTls')}</option>
-                            <option value="starttls">{tr('connect.securityStarttls')}</option>
-                          </select>
-                          <span id="cm-imap-security-hint" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--fg-3)' }}>
-                            {tr('connect.securityPortNote')}
-                          </span>
-                        </div>
-                      </fieldset>
+                      {connectionMode !== 'smtp' && (
+                        <fieldset style={{ border: '1px solid var(--border-1)', borderRadius: 8, padding: 12, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          <legend style={{ fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600, color: 'var(--fg-2)', padding: '0 6px' }}>
+                            {tr('connect.imapSectionLabel')}
+                          </legend>
+                          <div className="field">
+                            <label htmlFor="cm-imap-security">{tr('connect.imapSecurityLabel')}</label>
+                            <select id="cm-imap-security" className="input" value={form.imapSecurity} onChange={e => setSecurity('imap', e.target.value)} disabled={isReconnect} aria-describedby="cm-imap-security-hint">
+                              <option value="tls">{tr('connect.securityTls')}</option>
+                              <option value="starttls">{tr('connect.securityStarttls')}</option>
+                            </select>
+                            <span id="cm-imap-security-hint" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--fg-3)' }}>
+                              {tr('connect.securityPortNote')}
+                            </span>
+                          </div>
+                        </fieldset>
+                      )}
 
-                      <fieldset style={{ border: '1px solid var(--border-1)', borderRadius: 8, padding: 12, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <legend style={{ fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600, color: 'var(--fg-2)', padding: '0 6px' }}>
-                          {tr('connect.smtpSectionLabel')}
-                        </legend>
-                        <div className="field">
-                          <label htmlFor="cm-smtp-security">{tr('connect.smtpSecurityLabel')}</label>
-                          <select id="cm-smtp-security" className="input" value={form.smtpSecurity} onChange={e => setSecurity('smtp', e.target.value)} disabled={isReconnect} aria-describedby="cm-smtp-security-hint">
-                            <option value="tls">{tr('connect.securityTls')}</option>
-                            <option value="starttls">{tr('connect.securityStarttls')}</option>
-                          </select>
-                          <span id="cm-smtp-security-hint" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--fg-3)' }}>
-                            {tr('connect.securityPortNote')}
-                          </span>
-                        </div>
-                      </fieldset>
+                      {connectionMode !== 'imap' && (
+                        <fieldset style={{ border: '1px solid var(--border-1)', borderRadius: 8, padding: 12, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          <legend style={{ fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600, color: 'var(--fg-2)', padding: '0 6px' }}>
+                            {tr('connect.smtpSectionLabel')}
+                          </legend>
+                          <div className="field">
+                            <label htmlFor="cm-smtp-security">{tr('connect.smtpSecurityLabel')}</label>
+                            <select id="cm-smtp-security" className="input" value={form.smtpSecurity} onChange={e => setSecurity('smtp', e.target.value)} disabled={isReconnect} aria-describedby="cm-smtp-security-hint">
+                              <option value="tls">{tr('connect.securityTls')}</option>
+                              <option value="starttls">{tr('connect.securityStarttls')}</option>
+                            </select>
+                            <span id="cm-smtp-security-hint" style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--fg-3)' }}>
+                              {tr('connect.securityPortNote')}
+                            </span>
+                          </div>
+                        </fieldset>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3428,7 +3962,7 @@ export function ConnectModal({
                   }}
                 >
                   <span className="cm-check-spinner" aria-hidden="true" />
-                  {tr('connect.verifyingStep')}
+                  {tr(checkProgressKey)}
                 </div>
               )}
 
@@ -3495,7 +4029,65 @@ export function ConnectModal({
                     </a>
                   )}
 
-                  {(errorDetail || appPasswordUrl || authHelp.lines.length > 0) && (
+                  {/* The fix: one block from the fix table
+                      (lib/email/auth-failure-help.ts connectFix), chosen by
+                      provider, reason, phase and host. The steps, the exact
+                      links, and a way to retry in place. */}
+                  {fix && (
+                    <div className="cm-fix" data-fix-row={fix.row} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5, lineHeight: 1.55 }}>
+                      <span style={{ fontWeight: 600 }}>{tr('connect.fix.heading')}</span>
+                      {fix.steps.length > 0 && (
+                        <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {fix.steps.map(line => (
+                            <li key={line.key}>{tr(line.key, line.values)}</li>
+                          ))}
+                        </ol>
+                      )}
+                      {fix.links.map(link => (
+                        <a
+                          key={link.id}
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-fix-link={link.id}
+                          onClick={onFixLinkClick}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--red-700)', fontWeight: 600, width: 'fit-content' }}
+                        >
+                          <Icon name="external" size={12} />
+                          {tr(link.labelKey, link.values)}
+                        </a>
+                      ))}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                        {fix.action === 'use_outlook' ? (
+                          <Btn variant="secondary" size="sm" onClick={handleUseOutlook}>{tr('connect.fix.useOutlook')}</Btn>
+                        ) : (
+                          <Btn
+                            variant="secondary"
+                            size="sm"
+                            icon="refresh"
+                            busy={submitting}
+                            disabled={submitting || (fix.passwordProblem && !form.password)}
+                            onClick={() => handleAppPasswordSubmit()}
+                            className="cm-fix-test-again"
+                          >
+                            {tr('connect.fix.testAgain')}
+                          </Btn>
+                        )}
+                        {fix.suggestedHost && (
+                          <Btn variant="ghost" size="sm" onClick={applySuggestedHost} className="cm-fix-suggested-host">
+                            {tr('connect.fix.useSuggestedHost', { host: fix.suggestedHost.host })}
+                          </Btn>
+                        )}
+                        {fix.offerReceiveOnly && (
+                          <Btn variant="ghost" size="sm" disabled={submitting} onClick={connectReadOnly} className="cm-fix-receive-only">
+                            {tr('connect.fix.receiveOnly')}
+                          </Btn>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {(fix ? Boolean(errorDetail) : (errorDetail || appPasswordUrl || authHelp.lines.length > 0)) && (
                     <>
                       <button
                         type="button"
@@ -3542,14 +4134,16 @@ export function ConnectModal({
                               is already printed beside the password field, and
                               for a login-name or IMAP-disabled failure it is
                               not the next step at all. */}
-                          {authHelp.lines.map(line => (
+                          {/* With a fix block above, it already says all of
+                              this; only the route's own sentence is left. */}
+                          {!fix && authHelp.lines.map(line => (
                             <span key={line.key}>{tr(line.key, line.values)}</span>
                           ))}
-                          {!isGeneric && !authReason && (
+                          {!fix && !isGeneric && !authReason && (
                             <span>{tr(HINT_KEYS[provider] ?? 'connect.hintGeneric')}</span>
                           )}
                           {errorDetail && <span>{errorDetail}</span>}
-                          {appPasswordUrl && (
+                          {!fix && appPasswordUrl && (
                             <a
                               href={appPasswordUrl}
                               target="_blank"
@@ -3570,6 +4164,18 @@ export function ConnectModal({
                       )}
                     </>
                   )}
+
+                  <a
+                    href={supportContactHref(provider, shownFailureCode)}
+                    style={{ color: 'var(--red-700)', fontSize: 12.5, width: 'fit-content' }}
+                    onClick={(e) => {
+                      if (!onContactSupport || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      e.preventDefault();
+                      onContactSupport(e.currentTarget.getAttribute('href'));
+                    }}
+                  >
+                    {tr('connect.errorContactSupport')}
+                  </a>
                 </div>
               )}
 
@@ -3625,7 +4231,14 @@ export function ConnectModal({
               can be routed at Personal from here. */}
           {showLimitPanel && (
             <>
-              <Btn variant="ghost" onClick={onClose}>{tr('connect.cancel')}</Btn>
+              {/* Onboarding Flow B: "Continue on Free" as visible as the buy
+                  button (same size, outlined), where the click would start a
+                  new purchase. Everyone else keeps the ghost Cancel. */}
+              {continueOnFree && limitIsNewPurchase ? (
+                <Btn variant="secondary" className="continue-on-free" onClick={onClose}>{tConvert('planSummary.continueFree')}</Btn>
+              ) : (
+                <Btn variant="ghost" onClick={onClose}>{tr('connect.cancel')}</Btn>
+              )}
               {/* Locale-aware Link, unlike the checkout CTA below, and the
                   same treatment the identical link on the Inboxes page already
                   had: /pricing is an ordinary page with no side effects, so
@@ -3658,7 +4271,11 @@ export function ConnectModal({
                 <PlanCheckoutLink
                   plan={upgradeCopy.plan}
                   planName={planDisplayName(upgradeCopy.plan)}
-                  monthlyLabel={tr(upgradeCopy.ctaKey)}
+                  monthlyLabel={
+                    capCopy.founder
+                      ? tr(capCopy.ctaKey, { price: formatAmountCents(capCopy.founder.monthlyCents) })
+                      : tr(upgradeCopy.ctaKey)
+                  }
                   annualOffer={annual}
                   interval={upgradeInterval}
                 >
@@ -3674,6 +4291,24 @@ export function ConnectModal({
               <Btn variant="ghost" onClick={onClose}>{tr('connect.cancel')}</Btn>
               <Btn variant="primary" icon="shield" onClick={handleConnect}>
                 {connectLabel()}
+              </Btn>
+            </>
+          )}
+
+          {/* Connected: the next step is the AI app, not a bare list. */}
+          {!showLimitPanel && step === 3 && (
+            <>
+              <Btn variant="ghost" onClick={onClose}>{tr('connect.fix.done.later')}</Btn>
+              <Btn
+                variant="primary"
+                icon="zap"
+                className="cm-done-open-guide"
+                onClick={() => {
+                  if (onOpenClientGuide) onOpenClientGuide(CLIENT_NAMES[doneClient] || doneClient === 'curl' ? doneClient : null);
+                  else onClose();
+                }}
+              >
+                {tr('connect.fix.done.openGuide')}
               </Btn>
             </>
           )}

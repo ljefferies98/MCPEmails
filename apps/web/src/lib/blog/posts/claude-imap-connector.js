@@ -28,7 +28,7 @@ Claude therefore never needs an IMAP library, an SMTP configuration, or a passwo
 
 ## What you need before setup
 
-Collect these values from your email provider's help page or administrator:
+Collect these values from your email provider's help page or administrator. You can also check the [verified IMAP and SMTP settings for each provider](/connect):
 
 - **Email address:** for example, \`you@example.com\`. This is the address shown on the connected inbox.
 - **Login username:** usually the full email address. Some custom-domain hosts issue a different IMAP/SMTP username.
@@ -40,7 +40,7 @@ Do not guess the server names from the domain if your provider publishes setting
 
 Use an **app password** whenever the provider supports one. It is separate from your primary account password and can be revoked without changing the password you use to sign in. Providers commonly require two-factor authentication before they let you create one. Some also require you to enable IMAP access in mail settings first.
 
-MCPEmails includes presets for iCloud, Yahoo, Zoho, and Yandex, plus a dedicated Fastmail app-password flow. Those choices fill the known hosts and ports for you. Choose **Generic IMAP** for another provider or your own mail server and enter the values yourself.
+MCPEmails includes presets for [iCloud](/connect/icloud), [Yahoo](/connect/yahoo), [Zoho](/connect/zoho), and [Yandex](/connect/yandex), plus a dedicated [Fastmail](/connect/fastmail) app-password flow. Those choices fill the known hosts and ports for you. Choose **Generic IMAP** for another provider or your own mail server and enter the values yourself. See the [generic IMAP setup page](/connect/imap).
 
 ## Step 1: connect the IMAP/SMTP mailbox
 
@@ -87,7 +87,7 @@ That last capability deserves care. Permanent IMAP deletion bypasses Trash and m
 
 An IMAP connector is broad, but it does not make every provider identical.
 
-- **No incoming-mail push:** MCPEmails is request/response only. It does not send webhooks or trigger Claude when a message arrives. An automated workflow must poll on a schedule, for example by listing unread mail.
+- **No incoming-mail push into Claude:** the MCP tools are request/response, so nothing triggers Claude when a message arrives. A chat-based workflow polls on a schedule, for example by listing unread mail. Your own code can instead be woken by a new-mail webhook, which Pro and Business workspaces add under API Keys.
 - **Search varies by transport:** structured sender, subject, text, and date filters work across providers, but generic IMAP does not support the \`has_attachment\` search filter. Provider-native search syntax is not portable.
 - **Folders are not Gmail labels:** IMAP moves a message between folders, while Gmail can attach several labels to one message. The practical difference is explained in [Gmail labels vs. IMAP folders](/blog/gmail-labels-vs-imap-folders-ai-agents).
 - **SMTP is required for sending:** a working IMAP login proves that Claude can reach incoming mail, not that the SMTP host, port, or send permission is correct. Test one harmless outbound message before relying on a reply workflow.

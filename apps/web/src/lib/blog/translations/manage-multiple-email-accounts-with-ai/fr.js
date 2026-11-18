@@ -3,7 +3,7 @@ const translation = {
   description:
     'Faites passer vos boîtes professionnelle, personnelle et secondaire par un seul agent IA : comment il découvre les boîtes, comment cadrer une demande, des noms d\'expéditeur toujours justes et la validation des envois boîte par boîte.',
   coverAlt:
-    'Un agent IA connecté aux comptes e-mail professionnel, personnel et secondaire avec MCP Emails',
+    'Un agent IA connecté aux comptes e-mail professionnel, personnel et secondaire avec MCPEmails',
   content: `Presque personne n'a une seule boîte aux lettres. Vous avez une adresse professionnelle, une adresse personnelle et au moins une autre pour une activité secondaire ou pour un domaine que vous possédez toujours. Chaque question qui traverse deux comptes devient une recherche manuelle à deux endroits.
 
 Un seul agent IA sur l'ensemble supprime ces allers-retours, mais seulement si l'agent sait quelle boîte est laquelle et si les réponses partent de la bonne adresse.
@@ -12,7 +12,7 @@ Un seul agent IA sur l'ensemble supprime ces allers-retours, mais seulement si l
 
 ## Pourquoi un seul agent vaut mieux que changer de client mail
 
-Un client mail vous montre des comptes. Il ne répond pas aux questions. « Dans lequel de mes comptes le reçu Stripe est-il arrivé ? » suppose une recherche dans trois boîtes, plus un jugement. Un agent qui a accès à toutes les boîtes fait cela en une seule demande, et vous cessez de servir de routeur. Le deuxième gain : un seul jeu d'habitudes, puisque les mêmes outils se trouvent derrière chaque compte.
+Un client mail vous montre des comptes. Il ne répond pas aux questions. « Dans lequel de mes comptes le reçu Stripe est-il arrivé ? » suppose une recherche dans trois boîtes, plus un jugement. Un agent qui a accès à toutes les boîtes fait cela en une seule demande, et vous cessez de servir de routeur. Le deuxième gain : un seul jeu d'habitudes, puisque les mêmes outils se trouvent derrière chaque compte. [Plusieurs comptes e-mail dans Claude et ChatGPT](/blog/multiple-email-accounts-in-claude-and-chatgpt) détaille la configuration du connecteur dans les deux applications.
 
 ## Votre agent trouve les boîtes aux lettres tout seul
 
@@ -20,7 +20,7 @@ Vous ne collez jamais un identifiant de boîte dans un prompt. L'agent appelle \
 
 Deux détails à connaître :
 
-- **La découverte est gratuite.** \`inbox_list\` est le seul outil qui ne compte pas dans le quota mensuel d'actions du forfait Free, donc un agent peut se réorienter sans aucun coût.
+- **La découverte est gratuite.** \`inbox_list\` n'est jamais décompté, donc un agent peut se réorienter sans aucun coût.
 - **Des sélecteurs contradictoires sont refusés, pas devinés.** Un appel qui porte un \`inbox_id\` pour une boîte et une adresse \`inbox\` pour une autre est refusé, et l'erreur nomme les deux. La cause habituelle est un identifiant périmé repris plus tôt dans la conversation. Demandez à l'agent de réessayer avec la seule adresse.
 
 ## Limiter une demande à une seule boîte
@@ -37,7 +37,7 @@ C'est le point que l'on comprend souvent de travers : **un appel atteint une seu
 
 - Laissez-le appeler \`inbox_list\` d'abord, ou indiquez combien de comptes vous avez. S'il suppose qu'il y en a un, il rendra un rapport très assuré sur une seule boîte.
 - Demandez une réponse fusionnée (« une seule liste combinée, étiquetée avec le compte d'origine »), sinon vous recevrez trois rapports séparés.
-- Le volume augmente avec le nombre de boîtes. Un tri sur trois boîtes représente au moins trois actions facturables, pas une.
+- Le volume augmente avec le nombre de boîtes. Un tri sur trois boîtes représente au moins trois appels, pas un.
 
 ## Noms et identité d'expéditeur
 
@@ -45,11 +45,12 @@ Un seul champ remplit trois rôles. Chaque boîte a un nom affiché : c'est le *
 
 « work2 » est donc un mauvais nom à double titre : l'agent ne peut pas deviner à quoi sert la boîte, et un client mail finira par afficher « work2 » à côté de votre adresse. Utilisez quelque chose qu'un inconnu peut lire, par exemple « Jane Doe (Acme) » ou « Northside Studio ». Définissez-le dans le tableau de bord sous le **Nom d'expéditeur** (Sender name) de la boîte, ou avec \`signature_set\`, et relisez-le avec \`signature_get\`. Les noms sont limités à 100 caractères.
 
-Envoyer depuis un alias est plus restreint qu'on ne le croit :
+Envoyer depuis un alias fonctionne, mais seulement depuis des adresses dont vous avez prouvé qu'elles sont à vous :
 
 - Votre propre adresse connectée fonctionne toujours comme valeur de From, chez tous les fournisseurs.
-- Une adresse **différente** doit être une identité Gmail Send As vérifiée, listée sous \`sender_identities\` dans l'entrée \`inbox_list\` de cette boîte.
-- Chez un fournisseur autre que Gmail, une adresse From qui n'est pas celle de la boîte est refusée plutôt que réécrite en silence.
+- Sur une boîte IMAP (iCloud, Yahoo, Gmail connecté par mot de passe d'application, tout serveur SMTP), une adresse **différente** fonctionne dès qu'elle est vérifiée. Ajoutez-la dans les réglages de cette boîte dans le tableau de bord, puis saisissez le code que MCPEmails envoie à cette adresse. Les adresses vérifiées sont listées sous \`sender_identities\` dans l'entrée \`inbox_list\` de cette boîte.
+- Outlook envoie depuis l'adresse connectée.
+- Une adresse From qui n'est pas vérifiée pour la boîte est refusée plutôt que réécrite en silence.
 
 Les signatures sont elles aussi propres à chaque boîte : une signature formelle sur l'adresse professionnelle, rien sur l'adresse personnelle. Voir [les signatures e-mail pour Claude](/blog/email-signatures-for-claude).
 
@@ -89,12 +90,12 @@ Les configurations mixtes sont le cas normal, et les fournisseurs ne s'accordent
 
 Les boîtes connectées sont ce sur quoi les forfaits sont tarifés :
 
-- **Free, $0.** Une boîte connectée. 150 actions e-mail facturables par mois calendaire UTC, les 7 premiers jours n'étant pas comptés. Ce plafond mensuel s'applique aux espaces de travail créés le 2026-09-13 ou après ; les espaces de travail créés avant en sont exemptés.
-- **Personal, $9 par mois ou $86,40 par an.** Trois boîtes connectées, pas de plafond mensuel d'actions, limite de débit en rafale 2x, support par e-mail.
-- **Pro, $15 par mois ou $144 par an.** Boîtes connectées illimitées, limite de débit en rafale 5x, historique analytique plus long.
-- **Team, $79 par mois ou $756 par an.** Membres illimités avec rôles, un espace de travail distinct par client ou par activité, SSO (SAML/OIDC) et journal d'audit, support prioritaire.
+- **Free.** Une boîte connectée.
+- **Personal.** Quelques boîtes pour une seule personne, une limite de débit en rafale plus élevée, support prioritaire par e-mail.
+- **Pro.** Plus de boîtes pour une personne qui gère une activité professionnelle, une limite de débit en rafale plus élevée encore, un historique analytique plus long, des webhooks pour les nouveaux messages.
+- **Business.** Pour une équipe, facturé par personne. Chacun connecte ses propres boîtes en privé, les adresses partagées sont communes à toute l'entreprise (un lot inclus, avec un tarif par boîte au-delà), avec des rôles, des administrateurs qui valident les envois retenus, un espace de travail distinct par client ou par activité.
 
-Une routine multi-boîtes coûte une action par boîte, donc votre nombre de boîtes détermine le volume autant que vos habitudes. Détails sur la page [tarifs](/pricing).
+Une routine multi-boîtes représente un appel par boîte, donc votre nombre de boîtes détermine le volume autant que vos habitudes. Les tarifs et le nombre de boîtes à jour sont sur la page [tarifs](/pricing).
 
 ## FAQ
 
@@ -102,7 +103,7 @@ Une routine multi-boîtes coûte une action par boîte, donc votre nombre de bo�
 Par \`inbox_list\`, qui renvoie l'adresse et le nom affiché de chaque boîte qu'il peut utiliser. Nommez l'adresse dans votre demande. Un identifiant de boîte et une adresse qui se contredisent sont refusés, pas devinés.
 
 **Les réponses partiront-elles de la bonne adresse ?**
-Oui, quand vous envoyez depuis la boîte propriétaire de l'adresse : chaque boîte envoie via son propre fournisseur, son nom affiché et sa signature. Une adresse From différente exige une identité Gmail Send As vérifiée, et elle est refusée chez les autres fournisseurs.
+Oui, quand vous envoyez depuis la boîte propriétaire de l'adresse : chaque boîte envoie via son propre fournisseur, son nom affiché et sa signature. Une adresse From différente fonctionne sur une boîte IMAP une fois vérifiée avec un code envoyé à cette adresse. Outlook envoie depuis l'adresse connectée, et une adresse From non vérifiée est refusée.
 
 **Puis-je laisser l'agent envoyer librement depuis une boîte et en retenir une autre ?**
 Oui. La vérification avant envoi est un réglage par boîte, donc une boîte peut envoyer immédiatement pendant qu'une autre attend votre approbation dans un navigateur connecté.

@@ -2,12 +2,12 @@ const translation = {
   title: '7 ting AI-agenten din kan gjøre når den har tilgang til innboksen',
   description:
     'Sju konkrete ting en AI-agent kan gjøre med innbokstilgang: sortere ulest post, oppsummere tråder, skrive utkast til svar, finne vedlegg, følge opp og rute e-post.',
-  coverAlt: 'Sju ting AI-agenten din kan gjøre med innbokstilgang via MCP — MCPEmails',
+  coverAlt: 'Sju ting AI-agenten din kan gjøre med innbokstilgang via MCP (MCPEmails)',
   content: `Når agenten din kan lese og sende ekte e-post, stopper demoteateret og det faktiske arbeidet begynner. Her er sju ting du kan få den til å gjøre i dag: rydde i den uleste haugen, oppsummere en lang tråd, skrive utkast til svar i din stil, grave frem det ene vedlegget, følge opp ubesvarte tråder, rute post til rett sted og sende deg et ukentlig sammendrag.
 
 Hvert eksempel under bygger på ekte MCP-verktøy du kan kalle akkurat nå. Verktøyene er de samme enten du kobler til Gmail, Outlook, iCloud, Fastmail eller en vanlig IMAP-konto. Hvis du ennå ikke har koblet en agent til innboksen din, dekker [den komplette guiden til å gi AI-agenten din e-posttilgang](/blog/how-to-give-your-ai-agent-email-access) oppsettet; [gjennomgangen for å koble til på 2 minutter](/blog/connect-email-to-ai-agent-under-2-minutes) er den raske veien.
 
-Ett ærlig forbehold med en gang, fordi det former halve denne listen: **MCP Emails er pollebasert, ikke push.** Det finnes ingen webhooks og ingen serverinitierte hendelser. Agenten får ikke et pling når det kommer post. Den sjekker etter en tidsplan. Det høres ut som en begrensning, og for noen få bruksområder er det det, men det betyr også at ingenting utløses uten en klokke du styrer. Jeg markerer der polling har betydning.
+Ett forbehold med en gang, fordi det former halve denne listen: **verktøyene er basert på forespørsel og svar.** Agenten får ikke et pling når det kommer post; den sjekker etter en tidsplan. Det høres ut som en begrensning, og for noen få bruksområder er det det, men det betyr også at ingenting utløses uten en klokke du styrer. Vil du ha push likevel, kan Pro- og Business-arbeidsområder legge til en webhook under **API-nøkler** i dashbordet, og MCPEmails sender en signert POST til URL-en din når det kommer ny post. Jeg markerer der timingen har betydning.
 
 ## Verktøysettet, i én setning
 
@@ -29,7 +29,7 @@ Du blir lagt til i en tråd med 40 meldinger ved melding 38. Ingen kommer til å
 
 > Les tråden med emnet «Q3 vendor migration» og fortell meg hvor det faktisk landet: hva ble bestemt, hvem eier hva, og eventuelle åpne spørsmål jeg må svare på.
 
-\`email_read\` med handlingen search finner tråden (den bruker leverandørens egen søkesyntaks, så Gmail-operatorer, Outlook KQL og IMAP-tekstsøk fungerer alle), så henter \`email_read\` med handlingen read ut den parsede rene teksten i hver melding. Den read-handlingen kan også returnere renset HTML og vedlegg når du ber om det, men for et sammendrag er ren tekst raskere og billigere.
+\`email_read\` med handlingen search finner tråden (den tar strukturerte felt som avsender, emne, tekst og datoperiode, og MCPEmails gjør dem om til hver leverandørs eget søk), så henter \`email_read\` med handlingen read ut den parsede rene teksten i hver melding. Den read-handlingen kan også returnere renset HTML og vedlegg når du ber om det, men for et sammendrag er ren tekst raskere og billigere.
 
 ### 3. Skriv utkast til svar i din stil
 
@@ -73,7 +73,7 @@ Dette syr sammen de andre: \`email_read\` (handlingen search, så list) for å s
 
 ## Hva dette koster og hvor grensene ligger
 
-Alle sju fungerer på [Gratis-planen](/pricing), som koster $0 og kobler til én innboks med 60 forespørsler per minutt. Personal ($9 per måned) kobler til opptil tre innbokser og hever burst-grensen til 120 forespørsler per minutt; Pro ($15 per måned) kobler til alle postkassene du eier og hever den til 300; Team ($79 per måned) legger til medlemmer med roller, et eget arbeidsområde per kunde, SSO og 1 000 forespørsler per minutt. Én innboks holder lenge for et ukentlig sammendrag; i det øyeblikket du vil ha både jobb og privat i samme agent, er det Personal til $9 per måned, og Pro først når du passerer tre innbokser.
+Alle sju fungerer på [Gratis-planen](/pricing), som ikke koster noe og kobler til én innboks. Personal legger til innbokser for én person og hever burst-grensen; Pro legger til flere innbokser for den som driver en virksomhet, hever den igjen og gir webhooks for ny post; Business har et antall postkasser inkludert, med en pris per postkasse utover det, pluss medlemmer med roller og et eget arbeidsområde per kunde. Én innboks holder lenge for et ukentlig sammendrag; i det øyeblikket du vil ha både jobb og privat i samme agent, er det Personal. Gjeldende antall innbokser og priser finner du på [prissiden](/pricing).
 
 Når du først treffer en grense, returnerer serveren en feil du kan prøve på nytt, med \`data.retry_after\` i sekunder. Respekter den. Og prøv aldri blindt på nytt en \`email_compose\`-sending automatisk, for et nytt forsøk etter en timeout kan bety at to kopier av samme melding havner i noens innboks.
 

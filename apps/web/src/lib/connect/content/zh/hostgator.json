@@ -2,7 +2,9 @@
   "_sources": [
     "https://www.hostgator.com/help/article/pop3-or-imap-with-ssl",
     "https://www.hostgator.com/help/article/email-connection-settings",
-    "https://www.hostgator.com/help/article/professional-email-product-overview"
+    "https://www.hostgator.com/help/article/professional-email-product-overview",
+    "https://suporte.hostgator.com.br/hc/pt-br/articles/30811089087379-Como-usar-seu-e-mail-em-plataformas-externas-Gmail-Outlook-e-outros",
+    "https://suporte.hostgator.com.br/hc/pt-br/articles/30820346865811-Como-saber-o-nome-do-seu-servidor-na-HostGator"
   ],
   "auth": {
     "method": "mail-password",
@@ -20,7 +22,7 @@
     "titleLine1": "将 HostGator 邮箱连接到 Claude，",
     "titleLine2": "以及 Cursor、ChatGPT、任意 MCP 客户端",
     "lead": "为你的 AI 代理接入一个真正的 HostGator 邮箱。使用 HostGator 证书真正覆盖的服务器主机名，通过 IMAP 读取、搜索、发送、回复、定时与整理邮件。",
-    "answer": "Claude 无法自行访问 HostGator 邮箱。mcpemails 是一个托管 MCP 服务器，通过端口 993 的标准 IMAP 与之连接，让 Claude、Cursor 或任意 MCP 客户端都能读取、搜索、发送并整理这些邮件。HostGator 并不运行一台共用的邮件服务器：安全连接时，你要指向你自己服务器的主机名，在共享和云套餐上是 gatorNNNN.hostgator.com，在经销商套餐上是 servername.websitewelcome.com，因为它们的通配符证书覆盖的正是这些名称。认证使用在 cPanel 中为邮箱设置的密码，1 个收件箱免费。",
+    "answer": "Claude 无法自行访问 HostGator 邮箱。MCPEmails 是一个托管 MCP 服务器，通过端口 993 的标准 IMAP 与之连接，让 Claude、Cursor 或任意 MCP 客户端都能读取、搜索、发送并整理这些邮件。HostGator 并不运行一台共用的邮件服务器：安全连接时，你要指向你自己服务器的主机名，在共享和云套餐上是 gatorNNNN.hostgator.com，在经销商套餐上是 servername.websitewelcome.com，因为它们的通配符证书覆盖的正是这些名称。认证使用在 cPanel 中为邮箱设置的密码，1 个收件箱免费。",
     "meta0": "1 个收件箱永久免费",
     "meta1": "来自 cPanel 的邮箱密码",
     "meta2": "邮件实时获取，绝不存储"
@@ -31,7 +33,7 @@
   },
   "setup": [
     {
-      "h": "创建免费的 mcpemails 账户",
+      "h": "创建免费的 MCPEmails 账户",
       "p": "在 mcpemails.com 注册。免费套餐可连接一个收件箱，无需信用卡。"
     },
     {
@@ -40,7 +42,7 @@
     },
     {
       "h": "使用邮箱密码，而不是 cPanel 密码",
-      "p": "IMAP 验证的是为单个地址设置的密码。在 cPanel 中打开 <b>Email Accounts</b>，点击该地址旁的 <b>Manage</b> 设置密码。然后把它粘贴到 mcpemails，用户名填完整邮箱地址，服务器填你刚复制的服务器主机名。"
+      "p": "IMAP 验证的是为单个地址设置的密码。在 cPanel 中打开 <b>Email Accounts</b>，点击该地址旁的 <b>Manage</b> 设置密码。然后把它粘贴到 MCPEmails，用户名填完整邮箱地址，服务器填你刚复制的服务器主机名。"
     },
     {
       "h": "将 MCP URL 粘贴到你的 AI",
@@ -59,6 +61,10 @@
     {
       "h": "点过证书警告是错误的解决办法，还会掩盖真正的问题",
       "p": "由于名称不匹配在 HostGator 上极为常见，通常的变通方法是接受证书或添加例外。桌面客户端允许你这样做。而来自服务器的自动化 IMAP 连接（MCP 集成正是这种连接）通常不允许，也不应该允许：一旦你习惯性地忽略名称不匹配，就无法察觉真正的不匹配。指向服务器主机名，证书就能正常通过校验，任何地方都不需要例外。"
+    },
+    {
+      "h": "HostGator Brasil 运行自己的服务器，命名为 brNNN.hostgator.com.br",
+      "p": "从 HostGator Brasil 购买的套餐根本不在 gator 服务器上。它的支持站点记录了同样的 cPanel 端口，IMAP 为 993，使用 SSL 的 SMTP 为 465，但推荐的服务器名称是你自己主机套餐所在服务器的名称，形如 <code>br100.hostgator.com.br</code>，未加密的替代选项则是 <code>mail.seudominio.com.br</code>。这个名称显示在 Portal do Cliente 中 <b>Hospedagens e Servidores</b>（主机与服务器）、<b>Gerenciar</b>（管理）下的 <b>Nome do Servidor</b>（服务器名称）字段中，也在欢迎邮件的 <b>Informações Técnicas</b>（技术信息）部分。HostGator Brasil 的付费邮箱产品以 E-mail Profissional 名义销售，运行在 Titan 上，使用 <code>imap.titan.email</code> 和 <code>smtp.titan.email</code>；其支持文档称，客户端登录之前必须先为外部应用启用 Titan。这种邮箱请按 Titan 连接，而不是按 cPanel。"
     }
   ],
   "limits": [
@@ -68,7 +74,7 @@
   "faq": [
     {
       "q": "Claude 能用于 HostGator 邮箱吗？",
-      "a": "不能直接使用。Claude 没有 HostGator 连接器。通过 IMAP 将 mcpemails 这样的 MCP 服务器连接到邮箱后，Claude 就能读取、搜索、发送、回复、定时和整理其中的邮件，所用凭据与任何桌面邮件客户端相同。"
+      "a": "不能直接使用。Claude 没有 HostGator 连接器。通过 IMAP 将 MCPEmails 这样的 MCP 服务器连接到邮箱后，Claude 就能读取、搜索、发送、回复、定时和整理其中的邮件，所用凭据与任何桌面邮件客户端相同。"
     },
     {
       "q": "HostGator 的 IMAP 和 SMTP 设置是什么？",

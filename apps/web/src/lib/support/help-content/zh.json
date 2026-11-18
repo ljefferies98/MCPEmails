@@ -1,0 +1,286 @@
+{
+  "meta": {
+    "title": "帮助与支持",
+    "description": "关于连接、客户端和账单最常见问题的解答，以及一个直接联系 MCPEmails 团队的表单。"
+  },
+  "hero": {
+    "eyebrow": "帮助",
+    "title": "需要什么帮助？",
+    "lead": "搜索指南，展开下方的主题，或给我们写信。"
+  },
+  "search": {
+    "label": "搜索帮助",
+    "placeholder": "输入问题或关键词",
+    "empty": "没有匹配结果。",
+    "emptyLink": "在下方给我们写信",
+    "kinds": {
+      "provider": "服务商",
+      "client": "客户端",
+      "docs": "文档",
+      "faq": "常见问题",
+      "article": "文章"
+    }
+  },
+  "nav": {
+    "label": "帮助主题",
+    "contact": "联系我们"
+  },
+  "feedback": {
+    "question": "这篇文章有帮助吗？",
+    "yes": "有",
+    "no": "没有",
+    "thanks": "感谢你的反馈。",
+    "thanksNo": "感谢。告诉我们缺少了什么，我们会补上。",
+    "contactLink": "给我们写信",
+    "change": "更改回答"
+  },
+  "hints": {
+    "provider": "{category} · {domain}",
+    "providerNoDomain": "{category}",
+    "clientOauth": "配置指南 · OAuth 登录，无需 API 密钥",
+    "clientKey": "配置指南 · 限定权限的 API 密钥",
+    "docs": "文档",
+    "docsProviders": "每个服务商的设置与支持情况",
+    "docsClients": "每个 MCP 客户端的配置指南",
+    "faq": "价格常见问题"
+  },
+  "providerCategories": {
+    "generic": "任意 IMAP 邮箱",
+    "consumer": "网页邮箱",
+    "privacy": "注重隐私的邮箱",
+    "business": "企业邮箱",
+    "hosting": "附带邮箱的主机服务",
+    "cpanel": "cPanel 与共享主机",
+    "selfhost": "自建邮件服务器",
+    "isp": "网络运营商邮箱",
+    "regional": "地区性邮箱",
+    "blocked": "受限或不支持"
+  },
+  "articlesHeading": "常见问题的解决方法",
+  "articlesLead": "大家最常来信询问的问题，以及解决办法。",
+  "articles": [
+    {
+      "id": "imap-password-rejected",
+      "title": "邮件服务器拒绝了我的密码",
+      "summary": "几乎总是密码或用户名填错了。请使用邮箱本身的登录信息。",
+      "keywords": "imap smtp 密码 被拒 错误 登录 用户名 cpanel plesk 主机 自有域名 smtp 错误 发送失败",
+      "steps": [
+        "请填写邮箱密码，而不是主机或控制面板的登录密码。",
+        "用户名请使用完整的邮箱地址。",
+        "如果该邮箱开启了两步验证，请使用应用密码。",
+        "在主机商列出邮箱账户的地方重置密码（cPanel：“电子邮件账户”）。",
+        "对照我们的服务商指南核对服务器名称。"
+      ],
+      "links": [
+        {
+          "label": "通用 IMAP 指南",
+          "href": "/connect/imap"
+        },
+        {
+          "label": "服务商兼容性",
+          "href": "/docs/providers"
+        }
+      ]
+    },
+    {
+      "id": "app-password-required",
+      "title": "需要应用密码（Yahoo、iCloud、Gmail、Zoho）",
+      "summary": "这些服务商在这里不接受你的普通密码。请创建应用密码并粘贴。",
+      "keywords": "应用密码 应用专用密码 app password yahoo icloud apple gmail google zoho 两步验证 双重验证 2fa mfa",
+      "steps": [
+        "Yahoo：打开“账户安全”，然后选择“生成应用密码”。",
+        "iCloud：登录 account.apple.com，打开“登录与安全”，再打开“App 专用密码”。",
+        "Gmail：开启两步验证，然后访问 myaccount.google.com/apppasswords。",
+        "Zoho：创建应用专用密码，并在 Zoho Mail 设置中开启 IMAP。",
+        "按显示的样子粘贴即可，空格会被忽略。"
+      ],
+      "links": [
+        {
+          "label": "Yahoo Mail 指南",
+          "href": "/connect/yahoo"
+        },
+        {
+          "label": "iCloud 邮件指南",
+          "href": "/connect/icloud"
+        },
+        {
+          "label": "Gmail 指南",
+          "href": "/connect/gmail"
+        },
+        {
+          "label": "Zoho Mail 指南",
+          "href": "/connect/zoho"
+        }
+      ]
+    },
+    {
+      "id": "yandex-imap-disabled",
+      "title": "Yandex：IMAP 访问已关闭",
+      "summary": "开启 IMAP 之前，Yandex 会拒绝邮件应用，看起来就像密码错误。",
+      "keywords": "yandex imap 关闭 未开启 应用密码 邮件客户端 yandex 360",
+      "steps": [
+        "在 Yandex Mail 中打开“设置”，然后打开“邮件客户端”。",
+        "开启 IMAP 访问，并开启应用密码和 OAuth 令牌。",
+        "在 id.yandex.com 创建一个“邮件”类型的应用密码。",
+        "使用完整地址和该应用密码连接。"
+      ],
+      "links": [
+        {
+          "label": "Yandex Mail 指南",
+          "href": "/connect/yandex"
+        }
+      ]
+    },
+    {
+      "id": "assistant-sees-nothing",
+      "title": "已连接，但助手看不到任何邮件",
+      "summary": "邮箱已经连接，但你的助手说它没有邮件工具，或什么也找不到。",
+      "keywords": "没有工具 看不到 空 连接器 无效 claude chatgpt cursor 开发者模式 权限 inbox_list plugin any mailbox @",
+      "steps": [
+        "在控制台打开“收件箱”，确认该邮箱已列出且没有错误。如果显示错误，请重新连接。",
+        "添加连接器后请开启一个新对话。在 Claude 中，在 + 和“连接器”里确认 MCPEmails 已开启。在 ChatGPT 中，输入 @ 并选择 Any Mailbox（自定义 MCP 服务器则选 MCPEmails），后续问题需要用到邮件时请再次 @ 提及它。",
+        "请使用拥有该邮箱的同一个 MCPEmails 账户为连接器授权。",
+        "助手只能看到连接器或 API 密钥获得授权的工具。如果你授权时漏选了某项权限，请移除连接器后重新添加。",
+        "先让助手列出你的收件箱。邮件是在助手请求时实时获取的，不会自动推送过来。"
+      ],
+      "links": [
+        {
+          "label": "客户端配置指南",
+          "href": "/docs/clients"
+        },
+        {
+          "label": "错误代码",
+          "href": "/docs#errors"
+        }
+      ]
+    },
+    {
+      "id": "usage-limit-reached",
+      "title": "已达到使用上限",
+      "summary": "Free 每月含 150 次邮件操作。用完后，操作要等到 1 日（UTC）。",
+      "keywords": "使用上限 额度 配额 150 次 操作 免费 free 被拒 重置",
+      "steps": [
+        "在控制台的“用量”中查看已使用的操作次数。",
+        "列出收件箱以及你在控制台中的任何操作都不计数，注册后的前 3 天也不计数。",
+        "重试没有用。额度会在下个月 1 日（UTC）重置，已暂停的自动化会自行恢复。",
+        "Personal、Pro 和 Business 的邮件操作不限量，但需合理使用。"
+      ],
+      "links": [
+        {
+          "label": "价格常见问题",
+          "href": "/pricing#faq"
+        },
+        {
+          "label": "速率限制",
+          "href": "/docs#rate-limits"
+        }
+      ]
+    },
+    {
+      "id": "change-or-cancel-plan",
+      "title": "更改或取消套餐",
+      "summary": "随时可以在“设置”的“账单与套餐”中更改或取消。",
+      "keywords": "套餐 升级 降级 取消 订阅 账单 发票 退款 stripe 门户 付款 银行卡",
+      "steps": [
+        "打开“设置”，然后找到“账单与套餐”。",
+        "点击“管理账单”即可取消、更换银行卡或获取发票。",
+        "取消后将不再续费。在当前周期结束前，你仍保留原套餐。",
+        "首次扣款出乎意料？请在 14 天内给我们写信，我们会全额退款。"
+      ],
+      "links": [
+        {
+          "label": "控制台设置",
+          "href": "/dashboard/settings"
+        },
+        {
+          "label": "套餐与价格",
+          "href": "/pricing"
+        }
+      ]
+    },
+    {
+      "id": "disconnect-or-delete",
+      "title": "断开邮箱或删除账户",
+      "summary": "在控制台中移除一个邮箱、一个工作区或整个账户。",
+      "keywords": "断开 移除 收件箱 邮箱 删除 账户 工作区 关闭 危险区域",
+      "steps": [
+        "邮箱：在“收件箱”中点击该邮箱，然后点击“断开连接”。其保存的凭据会被删除。",
+        "工作区：在“设置”的“工作区”下，点击“删除工作区”。",
+        "账户：在“设置”的“危险区域”下，点击“删除账户”。此操作无法撤销。",
+        "以上任一操作都会取消被移除邮箱中仍在等待发送的定时邮件。删除账户时，我们还会请求 Google 撤销我们对通过 Google 登录连接的 Gmail 收件箱的访问权限，并给你发送确认邮件。",
+        "删除账户会立即取消付费套餐。未使用的时间不会自动退款：首次扣款后 14 天内，请给我们写信。如果想用完已付费的时间，请先取消，之后再删除。"
+      ],
+      "links": [
+        {
+          "label": "控制台收件箱",
+          "href": "/dashboard/inboxes"
+        },
+        {
+          "label": "控制台设置",
+          "href": "/dashboard/settings"
+        }
+      ]
+    }
+  ],
+  "contact": {
+    "heading": "给我们写信",
+    "lead": "我们会在一个工作日内通过邮件回复。",
+    "emailLine": "发送邮件至 {email}，或在这里留言。",
+    "openForm": "写留言"
+  },
+  "categories": {
+    "connect": "连接邮箱",
+    "client": "设置 AI 客户端",
+    "billing": "账单与套餐",
+    "bug": "有功能出错了",
+    "feature": "功能建议",
+    "other": "其他问题"
+  },
+  "form": {
+    "category": "主题类别",
+    "subject": "标题",
+    "message": "内容",
+    "email": "你的邮箱",
+    "emailSignedIn": "我们将回复至",
+    "submit": "发送消息",
+    "sending": "正在发送…",
+    "subjectConnect": "连接 {provider} 时遇到问题",
+    "aboutProvider": "相关服务商：{provider}"
+  },
+  "attach": {
+    "summary": "我们会随消息附带哪些信息",
+    "intro": "为了少一些来回询问，以下信息会随你的消息一起发送：",
+    "workspace": "工作区",
+    "plan": "套餐",
+    "mailboxes": "邮箱",
+    "noMailboxes": "尚未连接邮箱",
+    "lastError": "最近错误：{code}",
+    "from": "打开来源",
+    "provider": "服务商",
+    "code": "错误代码",
+    "never": "绝不附带：密码、令牌或你的邮件内容。",
+    "healthConnected": "已连接",
+    "healthPending": "待处理",
+    "healthNeedsReconnect": "需要重新连接",
+    "healthUnavailable": "无法使用"
+  },
+  "errors": {
+    "invalid_json": "提交表单时出错。请刷新页面后重试。",
+    "invalid_email": "请输入有效的邮箱地址，以便我们回复。",
+    "invalid_category": "请选择一个主题类别。",
+    "subject_required": "请填写标题。",
+    "subject_too_long": "标题太长，请控制在 150 个字符以内。",
+    "message_required": "请填写内容。",
+    "message_too_long": "内容太长，请控制在 5000 个字符以内。",
+    "invalid_form_token": "此页面打开太久了。请刷新后重新发送。",
+    "rate_limited": "短时间内发送的消息太多。请稍后再试，或写信至 support@mcpemails.com。",
+    "server_error": "我们未能保存你的消息。请重试，或写信至 support@mcpemails.com。",
+    "not_found": "联系表单暂时不可用。请写信至 support@mcpemails.com。",
+    "network": "无法连接到我们。请检查网络后重试。",
+    "unknown": "出了点问题。请重试，或写信至 support@mcpemails.com。"
+  },
+  "success": {
+    "withRef": "谢谢，我们已收到你的消息。你的参考编号是 {ref}。我们会通过邮件回复。",
+    "noRef": "谢谢，我们已收到你的消息。我们会通过邮件回复。"
+  }
+}

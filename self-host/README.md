@@ -1,4 +1,4 @@
-# Self-host MCP Emails
+# Self-host MCPEmails
 
 Run the **exact MCP server that powers [mcpemails.com](https://mcpemails.com)** on your own
 machine, against your own database. Your mailbox credentials never leave infrastructure you
@@ -223,6 +223,8 @@ IMAP_PASSWORD='mailbox-password' mcpe provision-inbox --email ops@yourcompany.ex
   --service generic --display-name "Ops"
 #  ✓ connected ops@yourcompany.example (generic, imap imap.migadu.com:993 tls / smtp smtp.migadu.com:587 starttls)
 ```
+
+Leave out `--smtp-host` for a receive-only inbox, or `--imap-host` for a send-only one.
 
 ## TLS: implicit TLS (465) vs STARTTLS (587)
 

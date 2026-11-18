@@ -1,7 +1,8 @@
 import * as net from 'net';
 import * as tls from 'tls';
-import type { ConnectionPhase, MailSecurity } from './validate-imap';
-import { sanitizeAuthDiagnostic } from './connection-config';
+import type { ConnectionPhase, MailSecurity } from './validate-imap.ts';
+import { sanitizeAuthDiagnostic } from './connection-config.ts';
+import { legacyTlsOptions } from './legacy-tls.ts';
 
 export const SMTP_VALIDATION_TIMEOUT_MS = 10_000;
 export type SmtpValidationResult =
@@ -20,9 +21,9 @@ export type SmtpValidationResult =
       phase: ConnectionPhase;
       /**
        * Sanitized, bounded server rejection text, mirroring the IMAP validator.
-       * Present only for AUTH_FAILED and AUTH_MECHANISM_UNSUPPORTED, where the
-       * server actually answered. Never contains the credential, the address or
-       * the SASL token.
+       * Present for AUTH_FAILED and AUTH_MECHANISM_UNSUPPORTED, where the
+       * server actually answered, and for a greeting that was itself a refusal.
+       * Never contains the credential, the address or the SASL token.
        */
       detail?: string;
     };
@@ -43,6 +44,12 @@ export interface SmtpCredential {
    * servername, so certificate validation is unchanged.
    */
   pinnedAddress?: string;
+  /**
+   * Opens the TCP leg through an already-connected tunnel instead of a direct
+   * dial. See ImapCredential.tunnel: TLS is still negotiated here against
+   * `host`, so the tunnel carries ciphertext only.
+   */
+  tunnel?: () => Promise<net.Socket>;
 }
 
 export const SMTP_AUTH_FAILED_MESSAGE =
@@ -188,14 +195,15 @@ function secure(host: string, port: number, servername: string, setSocket: (s: n
   return new Promise((resolve, reject) => {
     // `host` is the address dialled, `servername` the name the certificate must
     // match. Node's checkServerIdentity prefers `servername`, so pinning an IP
-    // here does not weaken validation.
-    const socket = tls.connect({ host, port, servername, rejectUnauthorized: true }); setSocket(socket);
+    // here does not weaken validation. legacyTlsOptions is empty except for
+    // docomo's exact hosts (legacy-tls.ts).
+    const socket = tls.connect({ host, port, servername, rejectUnauthorized: true, ...legacyTlsOptions(servername) }); setSocket(socket);
     socket.once('secureConnect', () => { socket.removeListener('error', reject); resolve(socket); }); socket.once('error', reject);
   });
 }
 function upgrade(host: string, plain: net.Socket, setSocket: (s: net.Socket) => void): Promise<tls.TLSSocket> {
   return new Promise((resolve, reject) => {
-    const socket = tls.connect({ socket: plain, servername: host, rejectUnauthorized: true }); setSocket(socket);
+    const socket = tls.connect({ socket: plain, servername: host, rejectUnauthorized: true, ...legacyTlsOptions(host) }); setSocket(socket);
     socket.once('secureConnect', () => { socket.removeListener('error', reject); resolve(socket); }); socket.once('error', reject);
   });
 }
@@ -213,10 +221,21 @@ export async function validateSmtpCredential(cred: SmtpCredential): Promise<Smtp
       let socket: net.Socket;
       // The address to dial. Falls back to the name only when no guard ran.
       const dialHost = cred.pinnedAddress || cred.host;
-      if (cred.security === 'tls') { phase = 'tls'; socket = await secure(dialHost, cred.port, cred.host, (s) => { active = s; }); }
+      if (cred.tunnel) {
+        phase = cred.security === 'tls' ? 'tls' : 'tcp';
+        const plain = await cred.tunnel();
+        active = plain;
+        socket = cred.security === 'tls' ? await upgrade(cred.host, plain, (s) => { active = s; }) : plain;
+      }
+      else if (cred.security === 'tls') { phase = 'tls'; socket = await secure(dialHost, cred.port, cred.host, (s) => { active = s; }); }
       else { phase = 'tcp'; socket = await tcp(dialHost, cred.port, (s) => { active = s; }); }
       phase = 'greeting';
-      if ((await readReply(socket)).code !== 220) return { ok: false, code: 'SMTP_PROTOCOL_ERROR', message: 'The SMTP server returned an unexpected greeting.', phase };
+      const greeting = await readReply(socket);
+      // The greeting is kept when it is a refusal: a server that turns an
+      // address away before any login (Orange's `550 ... Service refused.
+      // OFR_99`) says so here and nowhere else. Nothing has been sent yet, so
+      // there is no credential in it to strip.
+      if (greeting.code !== 220) return { ok: false, code: 'SMTP_PROTOCOL_ERROR', message: 'The SMTP server returned an unexpected greeting.', phase, detail: sanitizeAuthDiagnostic(String(greeting.code), greeting.lines.join(' '), []) };
       socket.write('EHLO mcpemails.com\r\n');
       const capabilities = await readReply(socket);
       if (capabilities.code !== 250) return { ok: false, code: 'SMTP_PROTOCOL_ERROR', message: 'The SMTP server rejected the connection greeting.', phase };

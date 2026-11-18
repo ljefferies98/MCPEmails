@@ -1,5 +1,5 @@
 # ============================================================
-# MCP Emails, self-host stack
+# MCPEmails, self-host stack
 # ============================================================
 # Start-up order (each step waits for the previous one to be healthy):
 #

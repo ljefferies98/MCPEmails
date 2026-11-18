@@ -1,0 +1,225 @@
+// ---------------------------------------------------------------------------
+// ConnectModal: "Still stuck? Contact support" under a failed connect.
+//
+// Run with: npm run test:support-ui
+//
+// The link opens the dashboard's own help section with the selected provider and
+// the route's `error_code` so the form arrives filled in:
+// `/dashboard/help?topic=connect&provider=<slug>&code=<code>#contact`, each
+// value URL-encoded and an empty one left out. A plain click hands that href
+// to `onContactSupport` (App switches sections without a reload).
+//
+// The real modal is rendered with the real English messages; only `fetch` is
+// replaced, to answer the connect route with a failure.
+// ---------------------------------------------------------------------------
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createElement } from 'react';
+import { installDom, mount, flush, waitFor } from '../../scripts/test-dom.mjs';
+
+installDom();
+globalThis.self ??= globalThis.window;
+window.HTMLElement.prototype.scrollIntoView ??= function scrollIntoView() {};
+globalThis.IntersectionObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
+const { default: AppLocaleProvider } = await import('../i18n/AppLocaleProvider.jsx');
+const { ConnectModal, supportContactHref } = await import('./ConnectModal.jsx');
+const { ToastProvider } = await import('./Toast.jsx');
+const chrome = (await import('../../messages/en/dashboardChrome.json', { with: { type: 'json' } })).default;
+
+const STILL_STUCK = chrome.connect.errorContactSupport;
+
+/**
+ * Mount the modal on the generic card at its credentials step. `reply` is what
+ * the connect route answers with.
+ */
+async function openForm(t, { reply, onContactSupport }) {
+  const requests = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url) === '/api/inboxes/imap') {
+      requests.push(JSON.parse(init.body));
+      return { ok: false, status: reply.status, json: async () => reply.body };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const props = {
+    reconnect: null,
+    onClose: () => {},
+    onConnect: () => {},
+    preselect: { card: 'generic' },
+    atInboxLimit: false,
+    planName: 'Free',
+    inboxCount: 0,
+    maxInboxes: null,
+    stripePrices: null,
+    businessShaped: false,
+    onAdminConsentLink: () => {},
+  };
+  if (onContactSupport) props.onContactSupport = onContactSupport;
+  const view = await mount(createElement(AppLocaleProvider, null, createElement(ToastProvider, null,
+    createElement(ConnectModal, props))));
+  t.after(async () => {
+    await view.unmount();
+    globalThis.fetch = previousFetch;
+  });
+  const next = buttonNamed(view, chrome.connect.enterCredentials);
+  assert.equal(next === null, false, 'step 1 has the button that opens the credentials form');
+  await flush(async () => { next.click(); });
+  await waitFor(() => view.container.querySelector('#cm-imap-host'), { message: 'the credentials form' });
+  return { view, requests };
+}
+
+function buttonNamed(view, text) {
+  return [...view.container.querySelectorAll('button')].find((b) => b.textContent.trim() === text) ?? null;
+}
+
+function linkNamed(view, text) {
+  return [...view.container.querySelectorAll('a')].find((a) => a.textContent.trim() === text) ?? null;
+}
+
+const q = (view, id) => view.container.querySelector(`#${id}`);
+
+async function type(input, value) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  await flush(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+}
+
+async function fillAndSubmit(view) {
+  await type(q(view, 'cm-email'), 'someone@example.com');
+  await type(q(view, 'cm-imap-host'), 'imap.example.com');
+  await type(q(view, 'cm-smtp-host'), 'smtp.example.com');
+  await type(q(view, 'cm-password'), 'a-long-enough-password');
+  await submitOnly(view);
+}
+
+async function submitOnly(view) {
+  const connect = buttonNamed(view, chrome.connect.connectInbox);
+  assert.equal(connect === null, false, 'the credentials step has its Connect button');
+  await flush(async () => { connect.click(); });
+}
+
+const AUTH_FAILED = { status: 401, body: { error: 'Login failed', error_code: 'auth_failed' } };
+
+test('a route failure: the link carries provider and code', async (t) => {
+  const { view, requests } = await openForm(t, { reply: AUTH_FAILED });
+  assert.equal(linkNamed(view, STILL_STUCK) === null, true, 'nothing before an error');
+  await fillAndSubmit(view);
+  await waitFor(() => requests.length === 1, { message: 'the connect request' });
+  const link = await waitFor(() => linkNamed(view, STILL_STUCK), { message: 'the contact link' });
+  assert.equal(link.getAttribute('href'), '/dashboard/help?topic=connect&provider=generic&code=auth_failed#contact');
+  assert.equal(q(view, 'cm-form-error').parentElement.contains(link), true, 'it sits in the error area');
+});
+
+test('a plain click hands the in-app href to onContactSupport, with no navigation', async (t) => {
+  const opened = [];
+  const { view, requests } = await openForm(t, { reply: AUTH_FAILED, onContactSupport: (h) => opened.push(h) });
+  await fillAndSubmit(view);
+  await waitFor(() => requests.length === 1, { message: 'the connect request' });
+  const link = await waitFor(() => linkNamed(view, STILL_STUCK), { message: 'the contact link' });
+  // dispatchEvent rather than .click(): its return value says whether the
+  // default (the navigation) was cancelled, which the modal's own listeners
+  // would otherwise hide by stopping propagation.
+  let notCancelled = null;
+  await flush(() => {
+    notCancelled = link.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  });
+  assert.equal(opened.join(','), '/dashboard/help?topic=connect&provider=generic&code=auth_failed#contact');
+  assert.equal(notCancelled, false, 'the navigation was cancelled');
+});
+
+test('the code is URL-encoded', async (t) => {
+  const reply = { status: 400, body: { error: 'x', error_code: 'odd code&x=1' } };
+  const { view, requests } = await openForm(t, { reply });
+  await fillAndSubmit(view);
+  await waitFor(() => requests.length === 1, { message: 'the connect request' });
+  const link = await waitFor(() => linkNamed(view, STILL_STUCK), { message: 'the contact link' });
+  assert.equal(link.getAttribute('href'), '/dashboard/help?topic=connect&provider=generic&code=odd%20code%26x%3D1#contact');
+});
+
+test('a client-side validation error after a route failure drops the old code', async (t) => {
+  const { view, requests } = await openForm(t, { reply: AUTH_FAILED });
+  await fillAndSubmit(view);
+  await waitFor(() => requests.length === 1, { message: 'the connect request' });
+  await waitFor(() => linkNamed(view, STILL_STUCK), { message: 'the first contact link' });
+  // Clear a host: the modal refuses before any request.
+  await type(q(view, 'cm-imap-host'), '');
+  await submitOnly(view);
+  await waitFor(
+    () => linkNamed(view, STILL_STUCK)?.getAttribute('href') === '/dashboard/help?topic=connect&provider=generic#contact',
+    { message: 'the link without the stale code' },
+  );
+  assert.equal(requests.length, 1, 'the second submit never reached the route');
+});
+
+test('supportContactHref omits empty values and encodes the rest', () => {
+  assert.equal(supportContactHref('', null), '/dashboard/help?topic=connect#contact');
+  assert.equal(supportContactHref('yahoo', ''), '/dashboard/help?topic=connect&provider=yahoo#contact');
+  assert.equal(supportContactHref('a b', 'c/d'), '/dashboard/help?topic=connect&provider=a%20b&code=c%2Fd#contact');
+});
+
+// ── The Inboxes page's "Reconnect not working?" banner link ─────────────────
+//
+// It opens the contact form on the connect topic (naming the provider when
+// every errored inbox shares one), in place. The real dashboard is rendered at
+// Inboxes.
+
+const { DashboardApp } = await import('./App.jsx');
+const { reconnectSupportHref } = await import('./Pages.jsx');
+const dashboardEn = (await import('../../messages/en/dashboard.json', { with: { type: 'json' } })).default;
+const BANNER_LINK = dashboardEn.inboxes.errorBannerSupport;
+
+function errored(address, provider) {
+  return {
+    id: `ib-${address}`, label: address.split('@')[0], address, provider, service: null, status: 'error', parked: false,
+    lastError: 'Login failed', hasImap: provider !== 'gmail', calls: 0, createdAt: '2026-09-01T00:00:00.000Z', lastCallAt: null,
+    draftEditorHidden: false, sendReviewMode: 'off', sendApprovalRequired: false,
+  };
+}
+
+async function renderInboxesBanner(t, { inboxes }) {
+  const previousFetch = globalThis.fetch;
+  // The help section's data is not under test: it answers with an error line.
+  globalThis.fetch = async (url) => (String(url).startsWith('/api/support/help-data')
+    ? { ok: false, status: 404, json: async () => ({}) }
+    : { ok: true, status: 200, json: async () => ({}) });
+  window.history.replaceState(null, '', '/dashboard/inboxes');
+  const view = await mount(createElement(AppLocaleProvider, null,
+    createElement(DashboardApp, {
+      initialRoute: 'inboxes',
+      user: { displayName: 'Ada', email: 'ada@example.com', initials: 'A', id: 'u-0001' },
+      workspace: { id: 'ws-0001', slug: 'acme', plan: 'pro', compedScale: null, displayName: 'Acme', isOwner: true, draftEditorEnabled: false, draftEditorHidden: false },
+      workspaces: [], activeWorkspaceId: 'ws-0001', mcpUrl: 'https://mcpemails.com/api/mcp', userRole: 'owner',
+      planLimits: { maxInboxes: 10, historyDays: 30 }, stripePrices: null, overviewStats: {}, activityFeed: [],
+      inboxes, apiKeys: [], usageData: {}, auditLog: [], members: [], pendingInvites: [],
+    })));
+  t.after(async () => {
+    await view.unmount();
+    globalThis.fetch = previousFetch;
+    window.history.replaceState(null, '', '/');
+  });
+  return view;
+}
+
+test('Inboxes banner: the contact form, prefilled for the provider', async (t) => {
+  const view = await renderInboxesBanner(t, { inboxes: [errored('a@example.com', 'yahoo')] });
+  const link = await waitFor(() => linkNamed(view, BANNER_LINK), { message: 'the banner link' });
+  assert.equal(link.getAttribute('href'), '/dashboard/help?topic=connect&provider=yahoo#contact');
+  await flush(() => link.click());
+  assert.equal(window.location.pathname, '/dashboard/help', 'the help section opened in place');
+  assert.equal(window.location.search, '?topic=connect&provider=yahoo');
+});
+
+test('reconnectSupportHref: a provider only when every errored inbox shares it', () => {
+  const two = [errored('a@example.com', 'yahoo'), errored('b@example.com', 'gmail')];
+  assert.equal(reconnectSupportHref(two), '/dashboard/help?topic=connect#contact');
+  assert.equal(reconnectSupportHref([errored('a@example.com', 'gmail'), errored('b@example.com', 'gmail')]), '/dashboard/help?topic=connect&provider=gmail#contact');
+});

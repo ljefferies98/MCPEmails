@@ -1,13 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceRoleClient } from '@/lib/supabase/service';
 import { encryptToken } from '@/lib/crypto';
 import { exchangeGmailCode } from '@/lib/email-providers/gmail';
 import { checkInboxLimit, inboxExistsForEmail } from '@/lib/plans/check-inbox-limit';
+import { checkConnectTarget, INBOX_OWNED_BY_OTHER_CODE, PRIVATE_INBOX_LIMIT_CODE } from '@/lib/inboxes/visibility';
+import { checkPrivateInboxLimit } from '@/lib/plans/check-private-inbox-limit';
+import { recordInboxCapHit } from '@/lib/plans/inbox-cap-events';
+import { syncMailboxAddonForWorkspace } from '@/lib/stripe/mailbox-addon';
 import { findOtherProviderInbox, INBOX_EXISTS_OTHER_PROVIDER } from '@/lib/inboxes/provider-conflict';
 import { captureError } from '@/lib/errors/capture';
 import { recordOAuthCallbackFailure, recordProductFunnelEvent } from '@/lib/analytics/product-funnel';
 import { clientGuidePath } from '@/lib/onboarding/state';
+import { alertGmailOAuthCapClosed, loadGmailOAuthCapState } from '@/lib/oauth/gmail-oauth-gate';
 import { canManageInboxes, fetchWorkspaceRole, INSUFFICIENT_ROLE_REDIRECT_CODE } from '@/lib/workspace/roles';
 
 // ---------------------------------------------------------------------------
@@ -194,17 +199,32 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 8. Enforce the plan inbox cap, but only for a brand-new address. A
   //    reconnect (the email already has a non-deleted inbox) reuses the
   //    existing row via upsert, so it must be allowed even at the cap.
+  // Business privacy model: an address already connected in this workspace
+  // as somebody else's PRIVATE inbox is refused, never overwritten (the upsert
+  // below would replace that person's tokens). Service role: the RLS read
+  // cannot see that row at all.
+  const target = await checkConnectTarget(serviceClient, oauthState.workspace_id, tokens.email, user.id);
+  if (!target.ok) {
+    return redirectWithError(target.reason === 'owned_by_other' ? INBOX_OWNED_BY_OTHER_CODE : 'save_failed');
+  }
+
+  // The service role here too: a hidden inbox still holds a plan slot.
   const alreadyConnected = await inboxExistsForEmail(
-    supabase,
+    serviceClient,
     oauthState.workspace_id,
     tokens.email
   );
   if (!alreadyConnected) {
-    const inboxLimit = await checkInboxLimit(supabase, oauthState.workspace_id);
+    const inboxLimit = await checkInboxLimit(supabase, oauthState.workspace_id, serviceClient);
     if (inboxLimit.atLimit) {
       await recordProductFunnelEvent(createServiceRoleClient(), { workspaceId: oauthState.workspace_id, stage: 'inbox_connection', outcome: 'failure', category: 'gmail', errorCategory: 'plan_limit', phase: 'persistence', connectionType: 'first_connect' });
+      await recordInboxCapHit(oauthState.workspace_id, inboxLimit);
       return redirectWithError('inbox_limit_reached');
     }
+    // Business per person: at most ten PRIVATE mailboxes each. A new
+    // connection starts private, so it counts. A reconnect adds nothing.
+    const privateLimit = await checkPrivateInboxLimit({ db: serviceClient, workspaceId: oauthState.workspace_id, userId: user.id });
+    if (privateLimit.atLimit) return redirectWithError(PRIVATE_INBOX_LIMIT_CODE);
   }
 
   // 9. Encrypt tokens before they touch the database.
@@ -230,6 +250,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     {
       workspace_id: oauthState.workspace_id,
       provider: 'gmail',
+      // The person connecting owns it. visibility is left to the column default
+      // (company while business_seat_pricing is off, private when on). A DB
+      // trigger keeps the owner of a live row on reconnect, and gives another
+      // person reconnecting a disconnected address a fresh row.
+      owner_user_id: user.id,
       email_address: tokens.email,
       oauth_access_token: encryptedAccessToken,
       oauth_refresh_token: encryptedRefreshToken,
@@ -262,6 +287,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // 9. Redirect to the Inboxes page with a success indicator.
   await recordProductFunnelEvent(serviceClient, { workspaceId: oauthState.workspace_id, stage: 'inbox_connection', outcome: 'success', category: 'gmail', phase: 'complete', connectionType: alreadyConnected ? 'reconnect' : 'first_connect' });
+  // Business bills mailboxes past ten: bring the add-on quantity in step.
+  // After the response, never awaited by it (src/lib/stripe/mailbox-addon.ts).
+  if (!alreadyConnected) after(() => syncMailboxAddonForWorkspace(oauthState.workspace_id).then(() => undefined));
+  // A new address may have been a new Google grant against the unverified
+  // client's 100-user lifetime cap. Recount after the response and alert the
+  // owner once if this grant closed the gate (src/lib/oauth/gmail-oauth-gate.ts).
+  if (!alreadyConnected) {
+    after(async () => {
+      const cap = await loadGmailOAuthCapState(serviceClient);
+      if (cap.closed) await alertGmailOAuthCapClosed(serviceClient, cap);
+    });
+  }
   const { data: onboarding } = await serviceClient.from('workspaces').select('onboarding_client').eq('id', oauthState.workspace_id).maybeSingle();
   const guide = new URL(clientGuidePath(onboarding?.onboarding_client), DASHBOARD_INBOXES);
   guide.searchParams.set('connected', 'gmail');

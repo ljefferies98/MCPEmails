@@ -1,9 +1,10 @@
 'use client';
 
 import { Fragment } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import { Nav, Footer } from './Sections';
+import { withReadingLang } from '@/i18n/reading-lang.mjs';
 
 // Rich-text tag handlers shared across this page (inline code + bold).
 const RICH = {
@@ -406,6 +407,8 @@ const HAS_PLANNED = Object.values(MATRIX).some((row) =>
 
 export default function ProvidersClient() {
   const t = useTranslations('docs');
+  const th = useTranslations('home');
+  const locale = useLocale();
   // Group rows by section for the section-head rows
   const sections = [];
   const seen = {};
@@ -441,7 +444,7 @@ export default function ProvidersClient() {
             {t('providers.verified.label')}: <b>{t('providers.verified.date')}</b>
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <a className="btn btn-primary btn-lg" href="/signup">{t('providers.hero.ctaConnect')}</a>
+            <a className="btn btn-primary btn-lg" href={withReadingLang('/signup', locale)}>{t('providers.hero.ctaConnect')}</a>
             <Link className="btn btn-secondary btn-lg" href="/docs">{t('providers.hero.ctaBack')}</Link>
           </div>
         </div>
@@ -506,6 +509,21 @@ export default function ProvidersClient() {
             <p style={{ margin: 0 }}>{t.rich('providers.connection.notes.autodetect', RICH)}</p>
             <p style={{ margin: 0 }}>{t.rich('providers.connection.notes.authMechanism', RICH)}</p>
             <p style={{ margin: 0 }}>{t.rich('providers.connection.notes.otherHosts', RICH)}</p>
+            {/* The dataset page is English only, so this is a plain <a> to the
+                unprefixed path: the locale-aware Link would send /es readers to
+                /es/docs/providers/data, which 404s by design. */}
+            <p style={{ margin: 0 }}>
+              {t.rich('providers.connection.notes.dataset', {
+                ...RICH,
+                data: (chunks) => <a href="/docs/providers/data">{chunks}</a>,
+              })}
+            </p>
+            {/* The lookup tool for any address; it has no zh page. */}
+            {locale !== 'zh' && (
+              <p style={{ margin: 0 }}>
+                <Link href="/tools/email-settings-lookup">{th('footer.linkSettingsLookup')}</Link>
+              </p>
+            )}
           </div>
         </div>
       </section>
@@ -615,7 +633,7 @@ export default function ProvidersClient() {
             {t('providers.cta.sub')}
           </p>
           <div className="pricing-cta-btns">
-            <a className="btn btn-primary btn-lg" href="/signup">{t('providers.cta.primary')}</a>
+            <a className="btn btn-primary btn-lg" href={withReadingLang('/signup', locale)}>{t('providers.cta.primary')}</a>
             <Link className="btn btn-on-dark btn-lg" href="/docs">{t('providers.cta.secondary')}</Link>
           </div>
         </div>

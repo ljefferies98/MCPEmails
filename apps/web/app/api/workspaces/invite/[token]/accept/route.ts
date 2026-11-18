@@ -1,7 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import crypto from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceRoleClient } from '@/lib/supabase/service';
+import { recordWorkspaceAuditEvent } from '@/lib/workspace/audit-events';
 import { mapInviteAcceptError } from '@/lib/workspace/invite-accept-error';
+import { ACTIVE_WORKSPACE_COOKIE } from '@/lib/workspace/active';
+import { syncBusinessSeatsForWorkspace } from '@/lib/stripe/business-seats';
 
 function hashToken(raw: string): string {
   return crypto.createHash('sha256').update(raw, 'utf8').digest('hex');
@@ -80,9 +84,38 @@ export async function POST(
     return NextResponse.json({ error: 'Invite not found.' }, { status: 404 });
   }
 
-  return NextResponse.json({
+  // Business billed per person: joining alone bills nothing (a person is
+  // billed once they own a mailbox), but someone who already owns one there
+  // from an earlier membership is billable again at once (business-seats.ts).
+  // After the response; a no-op with the switch off; never throws.
+  const joinedWorkspaceId = result.workspace_id;
+  after(() => syncBusinessSeatsForWorkspace(joinedWorkspaceId).then(() => undefined));
+
+  // Security audit view (never throws). The RPC ran as the user, so the row
+  // is written here with the service role.
+  await recordWorkspaceAuditEvent(createServiceRoleClient, {
+    workspaceId: joinedWorkspaceId,
+    actorUserId: user.id,
+    kind: 'invite_accepted',
+    target: user.email ?? user.id,
+    details: { role: result.role },
+  });
+
+  const res = NextResponse.json({
     workspaceId:   result.workspace_id,
     workspaceSlug: result.workspace_slug,
     role:          result.role,
   });
+  // Open the joined workspace next. Without this the dashboard falls back to
+  // the earliest-joined workspace, which for someone who signed up through the
+  // invite is the personal Free workspace created seconds earlier: they then
+  // connected their inbox there and met that workspace's inbox paywall.
+  res.cookies.set(ACTIVE_WORKSPACE_COOKIE, result.workspace_id, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  return res;
 }

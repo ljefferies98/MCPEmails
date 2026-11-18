@@ -26,7 +26,9 @@
  *   LIFECYCLE_EMAIL_FROM  The win-back sender. Deliberately a different address
  *                         from the transactional one.
  *                         Default: Asgeir Albretsen <asgeir@mcpemails.com>,
- *                         which is a real mailbox on the account.
+ *                         which is a real mailbox on the account. Production
+ *                         uses asgeir@updates.mcpemails.com (Resend-only
+ *                         subdomain, no mailbox; replies via lifecycleReplyTo).
  *   NEXT_PUBLIC_APP_URL   Base URL for links.
  */
 
@@ -41,8 +43,12 @@ import type { Database } from '@/types/database.types';
  * Mirrors the CHECK constraint on `users.unsubscribed_categories`. Adding one
  * here without adding it to the constraint means the opt-out silently fails to
  * store, so the two lists are kept adjacent on purpose.
+ *
+ * `activity_summary` is the day-8 "Your first week with MCPEmails" report
+ * (src/lib/retention/first-30-days.ts). Added to the constraint by
+ * 20261024170000_first_30_days.sql.
  */
-export const LIFECYCLE_CATEGORIES = ['lifecycle', 'product_update', 'research'] as const;
+export const LIFECYCLE_CATEGORIES = ['lifecycle', 'product_update', 'research', 'activity_summary'] as const;
 export type LifecycleCategory = (typeof LIFECYCLE_CATEGORIES)[number];
 
 export function isLifecycleCategory(value: string): value is LifecycleCategory {
@@ -58,6 +64,16 @@ export function appUrl(): string {
 
 export function lifecycleFrom(): string {
   return process.env.LIFECYCLE_EMAIL_FROM ?? DEFAULT_FROM;
+}
+
+/**
+ * Where a reply to a lifecycle email goes. LIFECYCLE_EMAIL_FROM can point at
+ * a sending-only subdomain (updates.mcpemails.com) that has no mailbox, so
+ * every lifecycle send sets this explicitly instead of letting replies follow
+ * the From address and bounce.
+ */
+export function lifecycleReplyTo(): string {
+  return process.env.LIFECYCLE_EMAIL_REPLY_TO ?? DEFAULT_FROM;
 }
 
 /**

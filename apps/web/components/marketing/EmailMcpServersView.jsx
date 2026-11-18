@@ -19,21 +19,19 @@ import * as C from '@/lib/compare/email-mcp-servers.mjs';
  * LAYOUT RULES, learned the hard way on 12 September 2026
  * ---------------------------------------------------------------------------
  * Everything on this page hangs off ONE left edge, the container's, and nothing
- * is centred except the shared CTA band at the foot. Two specific mistakes made
+ * is centred, the shared CTA band at the foot included. Two specific mistakes made
  * the first version of this page look like three pages stacked up, and both are
  * easy to reintroduce:
  *
- *  - `.hero-cta` and `.hero-meta` are flex rows that several other marketing
- *    pages override with `justifyContent: 'center'` while leaving the h1 and
- *    lead above them left-aligned. That override is copied from page to page
- *    and it is wrong every time: it puts the buttons on a different axis from
- *    the heading they belong to. Do not add it back here.
+ *  - `.hero-cta` and `.hero-meta` are flex rows that other marketing pages
+ *    used to override with `justifyContent: 'center'` while leaving the h1 and
+ *    lead above them left-aligned. That puts the buttons on a different axis
+ *    from the heading they belong to. Do not add it back, here or elsewhere.
  *
- *  - `.connect-callout` carries `max-width: 720px; margin: 0 auto`, so it
- *    centres itself regardless of what it sits under. Dropping one inside a
- *    left-aligned column produces a narrower box floating under a wider box.
- *    This page therefore uses no callout: the ranking method is plain text with
- *    a rule down its left edge, at the same measure as everything else.
+ *  - The `.connect-*` blocks (callout, gotchas, FAQ, related links) used to
+ *    carry `margin: 0 auto`, which centred a narrower box under a wider one.
+ *    They now sit on the left edge too. This page still uses no callout: the
+ *    ranking method is plain text with a rule down its left edge.
  *
  * `COL` is that measure. marketing.css puts prose at 720-760px
  * (.section-head, .faq-list, .providers-sub) and reserves the full 1136px
@@ -267,7 +265,7 @@ function Entry({ e }) {
   );
 }
 
-export default function EmailMcpServersView() {
+export default function EmailMcpServersView({ locales }) {
   return (
     <div>
       <Nav />
@@ -281,6 +279,12 @@ export default function EmailMcpServersView() {
             {C.hero.titleLine1}<br />{C.hero.titleLine2}
           </h1>
           <p className="pricing-page-lead">{C.hero.lead}</p>
+          {/* The visible half of the page's date. JSON-LD dateModified and the
+              sitemap read the same constant, so the three cannot disagree. */}
+          <p style={{ margin: '0 0 20px', color: 'var(--fg-3)', fontSize: 14 }}>
+            {`${C.hero.updatedLabel} `}
+            <time dateTime={C.PAGE_UPDATED}>{C.formatDate(C.PAGE_UPDATED)}</time>
+          </p>
           <div className="hero-cta">
             <a className="btn btn-primary btn-lg" href="/signup">{C.ctaBand.ctaPrimary}</a>
             <a className="btn btn-secondary btn-lg" href="#ranked">See the ranking</a>
@@ -363,7 +367,7 @@ export default function EmailMcpServersView() {
         </div>
       </section>
 
-      {/* The summary table. The one block that gets the full container: five
+      {/* The summary table. The one block that gets the full container: six
           columns do not fit in the reading measure, and it scrolls on its own. */}
       <section
         className="section"
@@ -372,9 +376,7 @@ export default function EmailMcpServersView() {
       >
         <div className="container">
           <h2 className="providers-h2">Side by side</h2>
-          <p className="providers-sub">
-            Two hosted services, an agent tool platform, and running it yourself.
-          </p>
+          <p className="providers-sub">{C.tableSub}</p>
           <div className="comparison-wrap">
             <table className="comparison-tbl">
               <thead>
@@ -475,6 +477,7 @@ export default function EmailMcpServersView() {
               <li key={s.url} style={{ overflowWrap: 'anywhere' }}>
                 <span>{s.label}: </span>
                 <a href={s.url} rel="nofollow noopener noreferrer" target="_blank">{s.url}</a>
+                <span>{', read '}<time dateTime={s.checkedOn}>{C.formatDate(s.checkedOn)}</time></span>
               </li>
             ))}
           </ul>
@@ -494,7 +497,7 @@ export default function EmailMcpServersView() {
         </div>
       </section>
 
-      <Footer />
+      <Footer locales={locales} />
     </div>
   );
 }

@@ -49,6 +49,16 @@ import {
   fetchUsageCapOverview,
   fetchUsageCapWorkspaces,
   fetchUserSignupDays,
+  fetchMailRelayDaily,
+  fetchMailRelayHosts,
+  fetchSignupTrend,
+  fetchDraftCardReach,
+  fetchHeardAbout,
+  fetchDraftCardStats,
+  fetchOnboardingArms,
+  fetchOnboardingDaily,
+  fetchOnboardingExperiments,
+  fetchOnboardingSteps,
   gmailCapProjection,
   type GrowthResult,
 } from '@/lib/analytics/growth-queries';
@@ -68,8 +78,9 @@ import {
   valuationMultiple,
 } from '@/lib/analytics/kiosk-revenue';
 import { fetchRevenueDetail } from '@/lib/analytics/operator-revenue';
+import { fetchPassSummary, passSummaryLine } from '@/lib/analytics/pass-summary';
 import { fetchRecentIncidents, fetchSystemHealth } from '@/lib/analytics/kiosk-health';
-import { achievementReport } from '@/lib/analytics/growth-achievements';
+import { fetchStoredUnlocks, datedMilestoneReport } from '@/lib/analytics/growth-milestone-store';
 import { agoLabel, formatDayKey, recordDay, streak } from '@/lib/analytics/growth-records';
 import { valuationFromArr } from '@/lib/analytics/revenue-math';
 import { GMAIL_OAUTH_USER_CAP } from '@/lib/analytics/growth-types';
@@ -108,6 +119,21 @@ import { CalendarHeat } from './CalendarHeat';
 import { ChannelQuality, Rail, StatStrip, Verdict, type RailRow } from './board/panels';
 import { Milestones } from './board/milestones';
 import { Tables } from './Tables';
+import { RelayHostTable, RelayHostsTile, RelayStatusTile, RelayWorkingTile } from './board/relay';
+import { relayHealth } from '@/lib/analytics/mail-relay-health';
+import { FETCH_WEEKS, signupTrend } from '@/lib/analytics/signup-trend';
+import { SignupTrendTile } from './board/signup-trend';
+import { HeardAboutTile } from './board/heard-about';
+import { DraftCardTile } from './board/draft-card';
+import { DRAFT_CARD_RELEASE_AT, releaseChecks, releaseVerdict } from '@/lib/analytics/draft-card';
+import { OnboardingStepsTile, OnboardingTestTile } from './board/onboarding';
+import {
+  armTotals,
+  onboardingChecks,
+  onboardingVerdict,
+  releaseState,
+} from '@/lib/analytics/onboarding-test';
+import { onboardingPublicEnrollment } from '@/lib/onboarding/variant';
 
 /** Ninety is a ceiling, not a taste: activity_log is purged past 90 days. */
 const DAILY_DAYS = 90;
@@ -267,16 +293,12 @@ export async function TopSection({ days }: { days: number }) {
                 title: 'Recurring revenue',
                 rows: mrr
                   ? [
-                      move('new', mrr.newCustomers, 'New', mrr.newMrrMinor, money, 'good'),
-                      // The click and the loss are different days: "Cancelled"
-                      // is who pressed cancel in the window, "Churned" is whose
-                      // billing actually stopped in it. A cancel scheduled for
-                      // next month is on the first row today and the second
-                      // row then, and must not be invisible in between.
-                      move('cancelled', mrr.cancelledCustomers, 'Cancelled', -mrr.cancelledMrrMinor, money, 'bad'),
-                      move('churn', mrr.churnedCustomers, 'Billing stopped', -mrr.churnedMrrMinor, money, 'bad'),
-                      move('risk', mrr.atRiskCustomers, 'Card failing', mrr.atRiskMinor, money, 'warn'),
-                      move('leaving', mrr.leavingCustomers, 'Set to stop', mrr.leavingMinor, money, 'warn'),
+                      // One customer, one row: see disjointMovements. The
+                      // cancellation rate tile below still counts every click.
+                      move('new', mrr.movements.new.customers, 'New', mrr.movements.new.mrrMinor, money, 'good'),
+                      move('churn', mrr.movements.stopped.customers, 'Billing stopped', -mrr.movements.stopped.mrrMinor, money, 'bad'),
+                      move('leaving', mrr.movements.leaving.customers, 'Set to stop', mrr.movements.leaving.mrrMinor, money, 'warn'),
+                      move('risk', mrr.movements.failing.customers, 'Card failing', mrr.movements.failing.mrrMinor, money, 'warn'),
                       {
                         key: 'valuation',
                         label: `Worth at ${valuationMultiple()}\u00d7 ARR`,
@@ -337,6 +359,17 @@ function rate(numerator: number, denominator: number): string {
   return formatPercent(numerator / denominator, 1);
 }
 
+/**
+ * A per-month churn rate. Under ten subscriber-months one cancel swings it by
+ * more than ten points, so it says so rather than printing a precise-looking
+ * figure.
+ */
+function monthlyChurn(value: number | null, subscriberMonths: number): string {
+  if (value == null) return NO_DATA;
+  if (subscriberMonths < 10) return 'too few';
+  return formatPercent(value, 1);
+}
+
 /** One MRR movement row. Churn is passed negative so it reads as a loss. */
 function move(
   key: string,
@@ -370,12 +403,13 @@ function deltaPercent(current: number, previous: number | null | undefined): num
 /* ============================================================= money band */
 
 export async function MoneySection({ days }: { days: number }) {
-  const [revenue, checkout, pressure, bands, conversion] = await Promise.all([
+  const [revenue, checkout, pressure, bands, conversion, passes] = await Promise.all([
     fetchRecurringRevenue(days),
     fetchCheckoutFunnel(),
     fetchUpgradePressure(),
     fetchInboxDistribution(),
     fetchSignupConversion(days),
+    fetchPassSummary(),
   ]);
 
   const mrr = orNull(revenue);
@@ -426,31 +460,42 @@ export async function MoneySection({ days }: { days: number }) {
                   : 'unavailable',
               },
               {
-                label: `Customer churn, ${days}d`,
-                value: mrr?.customerChurnRate != null
-                  ? rate(mrr.cancelledCustomers, mrr.churnBaseCustomers)
-                  : NO_DATA,
+                label: 'Monthly plans churn/month',
+                value: mrr ? monthlyChurn(mrr.monthlyBilledChurnRate, mrr.monthlyBilledSubscriberMonths) : NO_DATA,
                 note: mrr
-                  ? `${formatCount(mrr.cancelledCustomers)} of ${formatCount(mrr.churnBaseCustomers)} cancelled`
+                  ? `${formatCount(mrr.monthlyBilledCancelled)} cancelled in ${formatCount(Math.round(mrr.monthlyBilledSubscriberMonths))} subscriber-months`
                   : 'Stripe unavailable',
               },
               {
-                label: `Revenue churn, ${days}d`,
-                value: mrr?.revenueChurnRate != null
-                  ? rate(mrr.cancelledMrrMinor, mrr.churnBaseMrrMinor)
-                  : NO_DATA,
+                label: 'All plans churn/month',
+                value: mrr ? monthlyChurn(mrr.customerChurnRate, mrr.churnSubscriberMonths) : NO_DATA,
                 note: mrr
-                  ? `${formatMoney(mrr.cancelledMrrMinor, mrr.currency)} of ${formatMoney(mrr.churnBaseMrrMinor, mrr.currency)} MRR`
+                  ? `revenue ${monthlyChurn(mrr.revenueChurnRate, mrr.churnSubscriberMonths)} · ${formatCount(mrr.cancelledCustomers)} in ${formatCount(Math.round(mrr.churnSubscriberMonths))} sub-months`
                   : 'Stripe unavailable',
               },
             ]}
           />
           <p className="kiosk-big-caption">
             Churn counts a customer on the day they pressed cancel, including cancels that only take effect at
-            the end of the period, out of everyone who paid at any point in the window. Signup → paid follows the
+            the end of the period, per month a customer was actually subscribed in the window. Stripe divides by
+            a head count that includes everyone new, so it reads lower while sales grow. Annual plans have not
+            reached a renewal, so monthly plans are the figure to plan on. Signup → paid follows the
             window&apos;s signup cohort, which is young and will keep converting.
           </p>
         </Tile>
+      </Cell>
+
+      {/* The 3-month Personal pass: one-time payments, so never in MRR or in
+          the churn rates above, and never summed into subscribers. Its cash is
+          already in the cash tiles. */}
+      <Cell span={12}>
+        {passes.ok ? (
+          <Tile label="3-month passes" aside="not in MRR or churn">
+            <p className="kiosk-big-caption">{passSummaryLine(passes.data)}</p>
+          </Tile>
+        ) : (
+          <TileError label="3-month passes" message={passes.error} />
+        )}
       </Cell>
 
       <Cell span={4}>
@@ -478,6 +523,8 @@ export async function MoneySection({ days }: { days: number }) {
           >
             <BigNumber
               value={formatMoney(mrr.atRiskMinor + mrr.leavingMinor, mrr.currency)}
+              flash
+              goodDirection="down"
               caption={
                 // Never netted into the headline: a card Stripe cannot charge
                 // and a subscription winding down at period end need different
@@ -485,6 +532,15 @@ export async function MoneySection({ days }: { days: number }) {
                 <>
                   <strong>{formatMoney(mrr.atRiskMinor, mrr.currency)}</strong> uncollectable,{' '}
                   <strong>{formatMoney(mrr.leavingMinor, mrr.currency)}</strong> set to stop
+                  {mrr.pausedCustomers > 0 && (
+                    // Paused is not MRR and not churn: shown beside the risk,
+                    // never added to it.
+                    <>
+                      {', '}
+                      <strong>{formatCount(mrr.pausedCustomers)}</strong> paused (
+                      {formatMoney(mrr.pausedMinor, mrr.currency)}/mo when they resume)
+                    </>
+                  )}
                 </>
               }
             />
@@ -565,7 +621,7 @@ export async function MoneySection({ days }: { days: number }) {
 const WALL_ROWS = 5;
 
 /**
- * The Free action allowance: 150 email actions a month, first 7 days
+ * The Free action allowance: 150 email actions a month, first 3 days
  * uncounted, every workspace from before 2026-09-12 exempt for good.
  *
  * WHAT THIS BAND ANSWERS, in the order the tiles sit: how many workspaces
@@ -754,23 +810,25 @@ export async function UsageCapSection({ days }: { days: number }) {
 /* ======================================================== milestones band */
 
 export async function MilestoneSection() {
-  const [signups, daily, revenue, cash, checkout, lifecycle] = await Promise.all([
+  const [signups, daily, revenue, cash, checkout, lifecycle, stored] = await Promise.all([
     fetchUserSignupDays(DURABLE_DAYS),
     fetchDailyMetrics(DAILY_DAYS),
     fetchRecurringRevenue(DAILY_DAYS),
     fetchCashCollected(),
     fetchCheckoutFunnel(),
     fetchLifecycleCounts(),
+    fetchStoredUnlocks(),
   ]);
 
-  const report = achievementReport({
+  const input = {
     signups: orNull(signups),
     daily: orNull(daily),
     revenue: orNull(revenue),
     cash: orNull(cash),
     checkout: orNull(checkout),
     lifecycle: orNull(lifecycle),
-  });
+  };
+  const report = await datedMilestoneReport(input, stored);
 
   return (
     <Cell span={12} tall={3}>
@@ -780,11 +838,9 @@ export async function MilestoneSection() {
       >
         {/* No caption. Every caveat that used to be printed here is now where
             it belongs: the tool call rungs say "last 90 days" in their own
-            detail line because the log is purged there, and the MRR rungs
-            simply carry no date because Stripe is a snapshot and the month it
-            first crossed a threshold is not available at any price. Repeating
-            all three under the panel was four lines of prose explaining what
-            the rungs already say. */}
+            detail line because the log is purged there. Repeating caveats
+            under the panel was four lines of prose explaining what the rungs
+            already say. */}
         <Milestones report={report} />
       </Tile>
     </Cell>
@@ -794,7 +850,7 @@ export async function MilestoneSection() {
 /* ============================================================ growth band */
 
 export async function GrowthSection({ days }: { days: number }) {
-  const [signups, funnel, checkout, channels, providers, providerFunnel, bands, revenue, lifecycle] =
+  const [signups, funnel, checkout, channels, providers, providerFunnel, bands, revenue, lifecycle, trend, heardAbout] =
     await Promise.all([
       fetchUserSignupDays(DURABLE_DAYS),
       fetchActivationFunnel(DURABLE_DAYS),
@@ -805,6 +861,8 @@ export async function GrowthSection({ days }: { days: number }) {
       fetchEngagementBands(days),
       fetchRecurringRevenue(days),
       fetchLifecycleCounts(),
+      fetchSignupTrend(FETCH_WEEKS),
+      fetchHeardAbout(),
     ]);
 
   const signupRows = signups.ok ? signups.data : [];
@@ -816,6 +874,16 @@ export async function GrowthSection({ days }: { days: number }) {
 
   return (
     <>
+      {/* First in the band because it answers the question the rest of the
+          band only illustrates. Weekly on purpose: see signup-trend.ts. */}
+      <Cell span={12} tall={2}>
+        {trend.ok ? (
+          <SignupTrendTile trend={signupTrend(trend.data)} />
+        ) : (
+          <TileError label="Is signup growth over?" message={trend.error} />
+        )}
+      </Cell>
+
       <Cell span={6} tall={2}>
         {signups.ok && weeks.length > 0 ? (
           <Tile label="Signups and first mailboxes" aside={`${CHART_WEEKS} calendar weeks`}>
@@ -863,6 +931,17 @@ export async function GrowthSection({ days }: { days: number }) {
           </Tile>
         ) : (
           <TileError label="Which channels produce customers" message={channels.error} />
+        )}
+      </Cell>
+
+      {/* What the 'direct' channel above cannot say: the one-time dashboard
+          question, self-reported. Full width so the 8 + 4 row below keeps
+          its shape. */}
+      <Cell span={12} tall={2}>
+        {heardAbout.ok ? (
+          <HeardAboutTile rows={heardAbout.data} />
+        ) : (
+          <TileError label="Where they heard about us" message={heardAbout.error} />
         )}
       </Cell>
 
@@ -1239,4 +1318,108 @@ function cohortRows(cells: { cohort_week: string; cohort_size: number; week_inde
       // came back" for a week that has not happened.
       values: Array.from({ length: row.values.length }, (_, index) => row.values[index] ?? null),
     }));
+}
+
+
+/* ================================================== the mail relay */
+
+/**
+ * Which hosts go through the mail relay, and whether it works. Low priority,
+ * so it is the last band on the page. See components/admin/growth/board/relay.tsx.
+ */
+export async function RelaySection({ days }: { days: number }) {
+  const [daily, hosts] = await Promise.all([fetchMailRelayDaily(days), fetchMailRelayHosts(days)]);
+  if (!daily.ok || !hosts.ok) {
+    const message = !daily.ok ? daily.error : !hosts.ok ? hosts.error : '';
+    return (
+      <Cell span={12}>
+        <TileError label="Mail relay" message={message} />
+      </Cell>
+    );
+  }
+  const health = relayHealth(daily.data, hosts.data);
+  return (
+    <>
+      <Cell span={4}>
+        <RelayStatusTile health={health} days={days} />
+      </Cell>
+      <Cell span={4}>
+        <RelayWorkingTile health={health} days={days} />
+      </Cell>
+      <Cell span={4}>
+        <RelayHostsTile health={health} />
+      </Cell>
+      <Cell span={12}>
+        <RelayHostTable rows={hosts.data} />
+      </Cell>
+    </>
+  );
+}
+
+/* ============================================================= draft card */
+
+/**
+ * The draft editor card's release read-out: one answer and three numbers.
+ * The window applies to the before-release baseline; the after-release half
+ * runs from DRAFT_CARD_RELEASE_AT to now (90 days at most).
+ */
+export async function DraftCardSection({ days }: { days: number }) {
+  const released = DRAFT_CARD_RELEASE_AT !== null;
+  const [stats, reach] = await Promise.all([fetchDraftCardStats(days, DRAFT_CARD_RELEASE_AT), fetchDraftCardReach()]);
+  if (!stats.ok) {
+    return (
+      <Cell span={12}>
+        <TileError label="Draft card" message={stats.error} />
+      </Cell>
+    );
+  }
+  const reachRow = reach.ok ? reach.data : null;
+  const checks = releaseChecks(stats.data, reachRow, released);
+  return (
+    <Cell span={12}>
+      <DraftCardTile verdict={releaseVerdict(checks, released)} checks={checks} rows={stats.data} reach={reachRow} />
+    </Cell>
+  );
+}
+
+/* ============================================================= onboarding */
+
+/**
+ * The onboarding test's read-out (onb_flow x onb_convert): one answer, the
+ * deciding number per test, and the setup dialog's funnel. The window applies
+ * to the coverage check only; the arms are all-time.
+ */
+export async function OnboardingSection({ days }: { days: number }) {
+  const [experiments, arms, steps, daily] = await Promise.all([
+    fetchOnboardingExperiments(),
+    fetchOnboardingArms(),
+    fetchOnboardingSteps(),
+    fetchOnboardingDaily(days),
+  ]);
+  if (!experiments.ok || !arms.ok) {
+    const message = !experiments.ok ? experiments.error : !arms.ok ? arms.error : '';
+    return (
+      <Cell span={12}>
+        <TileError label="Onboarding" message={message} />
+      </Cell>
+    );
+  }
+  const state = releaseState(experiments.data, onboardingPublicEnrollment());
+  const today = new Date().toISOString().slice(0, 10);
+  // The checks still run (split, coverage, harm); they only surface in the verdict when one fails.
+  const checks = onboardingChecks(arms.data, daily.ok ? daily.data : [], state.kind === 'running' ? state.startedAt : null, today);
+  return (
+    <>
+      <Cell span={8}>
+        <OnboardingTestTile verdict={onboardingVerdict(state, checks)} state={state} rows={arms.data} />
+      </Cell>
+      <Cell span={4}>
+        {steps.ok ? (
+          <OnboardingStepsTile steps={steps.data} assignedNew={armTotals(arms.data, 'flow', 'new').assigned} />
+        ) : (
+          <TileError label="Where people stop" message={steps.error} />
+        )}
+      </Cell>
+    </>
+  );
 }

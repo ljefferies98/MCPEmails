@@ -22,8 +22,13 @@
 // rather than harmful:
 //
 //   reject   — fail-safe. Worst case: an email does not go out.
-//   update   — changes what a human will be shown before they approve.
-//   schedule — moves a delivery time. Still requires the human approve.
+//   update   — changes what a human will be shown before they approve. Only
+//              the key that queued the send may do it, and every change bumps
+//              `send_approvals.revision` (a trigger), so a reviewer whose page
+//              shows an older revision cannot approve the newer one: the
+//              decide paths claim with `.eq("revision", <rendered>)`.
+//   schedule — moves a delivery time. Still requires the human approve. Same
+//              creator-only rule, and it bumps the revision too.
 //   review   — discloses a body the same key already composed.
 //
 // Approving is irreversible and exfiltration-capable, so it lives on exactly
@@ -47,6 +52,8 @@
 import { neutralizeList, neutralizeMaybe, neutralizeText } from "./text-safety.ts";
 import { plainTextBodyToHtml } from "./signature-compose.ts";
 import { EMAIL_HTML_MAX_LENGTH } from "./signature-sanitizer.ts";
+import { approvedDraftSnapshotFrom } from "./draft-send-snapshot.ts";
+import { openApprovalSummary, sealApprovalSummary } from "./approval-summary.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -56,17 +63,34 @@ import { EMAIL_HTML_MAX_LENGTH } from "./signature-sanitizer.ts";
 export const CARD_SCHEMA_VERSION = "review-card-v1";
 
 /**
- * How long a queued send stays decidable. After this, no human and no tool can
- * turn it into a delivery: the decide paths refuse it, the tools here retire
- * the row, and the scheduled-send dispatcher re-checks it before running the
- * original operation.
+ * The DEFAULT time a queued send stays decidable. After its window, no human
+ * and no tool can turn it into a delivery: the decide paths refuse it, the
+ * tools here retire the row, and the scheduled-send dispatcher re-checks it
+ * before running the original operation.
  *
- * 24h is chosen to match the `outbound_idempotency` retention window, so a
- * caller retrying with the same `idempotency_key` after an approval lapses
- * always finds either a live approval or a clean slate — never a dead record
- * it cannot get past.
+ * A workspace may choose a longer window on the Approvals page
+ * (`workspaces.approval_window_hours`, migration 20261114110000); see
+ * `approvalTtlMsForHours`. 24h matches the `outbound_idempotency` retention
+ * window, and a longer approval stretches its idempotency record to the same
+ * deadline, so a caller retrying with the same `idempotency_key` always finds
+ * either a live approval or a clean slate, never a dead record it cannot get
+ * past.
  */
 export const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** The windows a workspace may pick, in hours. Mirrors the DB CHECK. */
+export const APPROVAL_WINDOW_HOURS = [24, 72, 168, 336] as const;
+
+/**
+ * The approval TTL for a stored `approval_window_hours`. Anything that is not
+ * one of the allowed windows (a missing column, null, garbage) is the 24h
+ * default: an unreadable setting must never lengthen the window.
+ */
+export function approvalTtlMsForHours(hours: unknown): number {
+  return typeof hours === "number" && (APPROVAL_WINDOW_HOURS as readonly number[]).includes(hours)
+    ? hours * 60 * 60 * 1000
+    : APPROVAL_TTL_MS;
+}
 
 /** Contract §2: each body is clipped at 64 KB and the clip is flagged. */
 const BODY_CLIP_BYTES = 64 * 1024;
@@ -391,7 +415,8 @@ interface ApprovalRow {
   operation: string;
   payload: unknown;
   payload_encrypted: boolean | null;
-  summary: Record<string, unknown> | null;
+  /** Stored shape: the `{v,data}` wrapper, or a plain object on older rows. */
+  summary: unknown;
   send_at: string | null;
   status: string;
   created_at: string | null;
@@ -527,7 +552,7 @@ async function loadPendingApproval(
           outcome: "expired",
           headline: "This request expired before it was decided.",
           detail:
-            "Pending sends stay decidable for 24 hours. Nothing was sent. Ask the agent to compose it again if it is still wanted.",
+            "It was not decided within the workspace's approval window. Nothing was sent. Ask the agent to compose it again if it is still wanted.",
           affected_count: 0,
           dashboard_url: `${deps.appUrl}/dashboard/approvals`,
           error_code: null,
@@ -742,7 +767,8 @@ async function buildOutboundEnvelope(
   row: ApprovalRow,
 ): Promise<Record<string, unknown>> {
   const snapshot = await readSnapshot(deps, row);
-  const summary = (row.summary ?? {}) as Record<string, unknown>;
+  // Encrypted since 2026-10-30; older rows hold the plain object (both read).
+  const summary = await openApprovalSummary(row.summary, deps.decrypt);
 
   const { data: inbox } = await deps.db
     .from("inboxes")
@@ -768,16 +794,34 @@ async function buildOutboundEnvelope(
   const summaryCc = neutralizeList(summary.cc);
   const to = summaryTo.length ? summaryTo : neutralizeList(snapshot?.to);
   const cc = summaryCc.length ? summaryCc : neutralizeList(snapshot?.cc);
+  // Count only, on this channel (it reaches the model). The signed-in review
+  // page and the dashboard dialog show the addresses.
   const subject = neutralizeText(
     (typeof summary.subject === "string" && summary.subject) ||
       (typeof snapshot?.subject === "string" ? snapshot.subject as string : "") || "",
   );
 
   const providerSide = contentLivesWithProvider(row.operation);
-  const text = providerSide ? { value: null, truncated: false } : clipBody(snapshot?.body);
-  const html = providerSide ? { value: null, truncated: false } : clipBody(snapshot?.html_body);
+  // A held draft send carries the server's own read of the draft
+  // (draft-send-snapshot.ts), so the card shows the message that was approved
+  // AS. Without one (queued before the snapshot existed) there is nothing to
+  // show, and the approved send is refused anyway.
+  const draftSnapshot = providerSide ? approvedDraftSnapshotFrom(snapshot) : null;
+  const text = providerSide
+    ? clipBody(draftSnapshot?.body_text)
+    : clipBody(snapshot?.body);
+  const html = providerSide
+    ? clipBody(draftSnapshot?.body_html)
+    : clipBody(snapshot?.html_body);
+  const snapshotTruncated = draftSnapshot?.body_truncated === true;
 
-  const attachments = Array.isArray(snapshot?.attachments)
+  const attachments = draftSnapshot
+    ? draftSnapshot.attachments.slice(0, 25).map((a) => ({
+      filename: neutralizeText(a.filename),
+      size_bytes: a.size_bytes,
+      mime_type: a.mime_type ? neutralizeText(a.mime_type) : null,
+    }))
+    : Array.isArray(snapshot?.attachments)
     ? (snapshot!.attachments as unknown[]).slice(0, 25).map((entry) => {
       const item = (entry ?? {}) as Record<string, unknown>;
       // The stored key is `data` (base64), per the email_send input schema.
@@ -845,7 +889,7 @@ async function buildOutboundEnvelope(
       body: {
         text: text.value,
         html: html.value,
-        truncated: text.truncated || html.truncated,
+        truncated: text.truncated || html.truncated || snapshotTruncated,
       },
       attachments,
       // True for a forward that will relay the original's own attachments,
@@ -900,8 +944,8 @@ async function buildOutboundEnvelope(
  * the caller supplied moments ago.
  *
  * MODEL-CONTEXT NOTE (contract §7). The returned envelope contains decrypted
- * body content for every operation except `draft_send` (whose content lives
- * with the provider, see `contentLivesWithProvider`). It belongs in
+ * body content for every operation (for `draft_send`, the server's snapshot of
+ * the draft, see draft-send-snapshot.ts). It belongs in
  * `structuredContent` and must never be mirrored into the `content` text. Do
  * not hand this to `jsonOk`.
  */
@@ -914,7 +958,7 @@ async function buildOutboundEnvelope(
  *
  * ── THE TWO CHANNELS ARE NOT THE SAME OBJECT, ON PURPOSE ────────────────────
  * `content` reaches the model. `structuredContent` reaches the card. The
- * envelope carries decrypted body text and HTML for four of the five gated
+ * envelope carries decrypted body text and HTML for all five gated
  * operations, and contract §7 commits to the default flow not re-injecting
  * message content into the conversation, so only the payload goes into
  * `content`. This is why the caller must not reach for `index.ts#jsonOk`, which
@@ -936,7 +980,7 @@ export function heldSendToolResult(
   envelope: Record<string, unknown> | null,
 ): { content: { type: string; text: string }[]; structuredContent: Record<string, unknown> } {
   return {
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(payload) }],
     structuredContent: envelope ? { ...payload, ...envelope } : payload,
   };
 }
@@ -1221,6 +1265,8 @@ export async function runApprovalUpdate(
   const loaded = await loadPendingApproval(deps, caller, args["approval_id"]);
   if (!loaded.ok) return loaded.failure;
   const row = loaded.row;
+  const notRequester = requesterOnly(deps.appUrl, caller, row);
+  if (notRequester) return notRequester;
 
   // A draft_send approval stores a draft id, not a message: the body lives with
   // the provider and is sent verbatim at dispatch. Accepting an edit here would
@@ -1334,20 +1380,29 @@ export async function runApprovalUpdate(
 
   // Same atomic claim as the reject path: an edit must not land on a row that
   // has just been approved, or the human would have approved content that is no
-  // longer what will be sent.
-  const { data: claimed, error } = await deps.db
-    .from("send_approvals")
-    .update({
-      payload: { v: 1, data: ciphertext },
-      payload_encrypted: true,
-      // Refreshing the summary is not cosmetic: it is what the dashboard queue
-      // and the approve page render. `row.summary` is passed so a reply's
-      // provider-resolved recipients and subject survive a body-only edit.
-      summary: summaryFromSnapshot(updated, row.summary),
-    })
-    .eq("id", row.id)
-    .eq("workspace_id", caller.workspace_id)
-    .eq("status", "pending")
+  // longer what will be sent. And on the revision this edit was built from, so
+  // two edits racing cannot silently drop one. The write itself bumps the
+  // revision (trigger, migration 20261016160600), which is what makes a review
+  // page that rendered the old one unable to approve this one.
+  const { data: claimed, error } = await onRevision(
+    deps.db
+      .from("send_approvals")
+      .update({
+        payload: { v: 1, data: ciphertext },
+        payload_encrypted: true,
+        // Refreshing the summary is not cosmetic: it is what the dashboard queue
+        // and the approve page render. `row.summary` is passed so a reply's
+        // provider-resolved recipients and subject survive a body-only edit.
+        summary: await sealApprovalSummary(
+          summaryFromSnapshot(updated, await openApprovalSummary(row.summary, deps.decrypt)),
+          deps.encrypt,
+        ),
+      })
+      .eq("id", row.id)
+      .eq("workspace_id", caller.workspace_id)
+      .eq("status", "pending"),
+    row,
+  )
     .select("*")
     .maybeSingle();
 
@@ -1368,13 +1423,80 @@ export async function runApprovalUpdate(
       row.id,
     );
   }
-  if (!claimed) return decidedElsewhereDuringEdit(deps.appUrl, row.id);
+  if (!claimed) return await lostEditRace(deps, caller, row.id);
 
   const envelope = await buildOutboundEnvelope(deps, caller, claimed as ApprovalRow);
   return cardResult(
     envelope,
     outboundSummaryText(envelope, "Updated. This send is still awaiting human approval."),
   );
+}
+
+/**
+ * `approval_update` and `approval_schedule` change what a reviewer is shown, so
+ * only the key that queued the send may call them (security review
+ * 2026-10-16, F-04-02). Another client in the same workspace could otherwise
+ * rewrite a send it never composed while a person was reviewing it. The card
+ * calls these as the same key that made the send, so it is unaffected; review
+ * and reject stay open to every key that can see the approval.
+ */
+function requesterOnly(
+  appUrl: string,
+  caller: ApprovalCaller,
+  row: ApprovalRow,
+): ApprovalToolResult | null {
+  if (row.api_key_id && row.api_key_id === caller.id) return null;
+  return failureResult(
+    "error",
+    {
+      outcome: "failed",
+      headline: "Only the assistant that prepared this send can change it.",
+      detail:
+        "Nothing was changed. It can still be rejected here, or reviewed and decided on the review page.",
+      affected_count: 0,
+      dashboard_url: `${appUrl}/dashboard/approvals`,
+      error_code: "not_requester",
+    },
+    "not_requester",
+    "approval_not_requester",
+    row.id,
+  );
+}
+
+/** Scope a claim to the revision the change was built from, when the row has one. */
+function onRevision(query: any, row: ApprovalRow): any {
+  return typeof row.revision === "number" ? query.eq("revision", row.revision) : query;
+}
+
+/** An edit or reschedule whose claim matched nothing: decided, or changed by a concurrent edit. */
+async function lostEditRace(
+  deps: ApprovalDeps,
+  caller: ApprovalCaller,
+  approvalId: string,
+): Promise<ApprovalToolResult> {
+  const { data } = await deps.db
+    .from("send_approvals")
+    .select("status")
+    .eq("id", approvalId)
+    .eq("workspace_id", caller.workspace_id)
+    .maybeSingle();
+  if ((data as { status?: unknown } | null)?.status === "pending") {
+    return failureResult(
+      "error",
+      {
+        outcome: "failed",
+        headline: "This request changed while you were editing it.",
+        detail: "Nothing was changed by this edit. Reload the approval and try again.",
+        affected_count: 0,
+        dashboard_url: `${deps.appUrl}/dashboard/approvals`,
+        error_code: "changed",
+      },
+      "changed",
+      "approval_changed",
+      approvalId,
+    );
+  }
+  return decidedElsewhereDuringEdit(deps.appUrl, approvalId);
 }
 
 function decidedElsewhereDuringEdit(
@@ -1422,13 +1544,21 @@ export async function runApprovalSchedule(
   const loaded = await loadPendingApproval(deps, caller, args["approval_id"]);
   if (!loaded.ok) return loaded.failure;
   const row = loaded.row;
+  const notRequester = requesterOnly(deps.appUrl, caller, row);
+  if (notRequester) return notRequester;
 
-  const { data: claimed, error } = await deps.db
-    .from("send_approvals")
-    .update({ send_at: new Date(sendAtMs).toISOString() })
-    .eq("id", row.id)
-    .eq("workspace_id", caller.workspace_id)
-    .eq("status", "pending")
+  // The delivery time is shown to the reviewer, so moving it bumps the
+  // revision too (trigger): a page that showed "send now" cannot approve
+  // "send next week" without being reloaded.
+  const { data: claimed, error } = await onRevision(
+    deps.db
+      .from("send_approvals")
+      .update({ send_at: new Date(sendAtMs).toISOString() })
+      .eq("id", row.id)
+      .eq("workspace_id", caller.workspace_id)
+      .eq("status", "pending"),
+    row,
+  )
     .select("*")
     .maybeSingle();
 
@@ -1449,7 +1579,7 @@ export async function runApprovalSchedule(
       row.id,
     );
   }
-  if (!claimed) return decidedElsewhereDuringEdit(deps.appUrl, row.id);
+  if (!claimed) return await lostEditRace(deps, caller, row.id);
 
   const envelope = await buildOutboundEnvelope(deps, caller, claimed as ApprovalRow);
   return cardResult(

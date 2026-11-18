@@ -1,0 +1,102 @@
+{
+  "_sources": [
+    "https://www.strato.de/faq/mail/so-lauten-die-strato-e-mail-server/",
+    "https://www.strato.de/faq/mail/e-mail-authentifizierung-nach-abschaltung-von-md5-challenge-response/"
+  ],
+  "auth": {
+    "method": "mail-password",
+    "label": "E-Mail-Passwort des Postfachs",
+    "helpUrl": "https://www.strato.de/faq/mail/so-lauten-die-strato-e-mail-server/",
+    "usernameForm": "Ihre vollständige E-Mail-Adresse mit Domain: name@ihredomain.de. Nicht die Kundennummer und nicht der Teil vor dem @.",
+    "status": "active"
+  },
+  "meta": {
+    "title": "STRATO MCP-Server: STRATO E-Mail mit Claude verbinden (IMAP)",
+    "description": "STRATO E-Mail mit Claude verbinden: imap.strato.de:993, E-Mail-Passwort statt Kunden-Login, „Passwort, normal“. Jedes Firmenpostfach (info@, vertrieb@) einzeln."
+  },
+  "hero": {
+    "eyebrow": "STRATO E-Mail + KI",
+    "titleLine1": "STRATO E-Mail mit Claude verbinden:",
+    "titleLine2": "der MCP-Server für jedes Firmenpostfach Ihrer Domain",
+    "lead": "Sie betreiben info@, vertrieb@, support@ und rechnung@ auf Ihrer eigenen Domain bei STRATO? Verbinden Sie jedes Postfach mit einem Workspace, und Ihr KI-Agent arbeitet in allen: E-Mails lesen, suchen, beantworten, senden, planen und ablegen, per IMAP mit dem E-Mail-Passwort des Postfachs, nicht mit Ihrem STRATO Kunden-Login.",
+    "answer": "Claude kann ein STRATO-Postfach nicht von sich aus erreichen. MCPEmails ist ein gehosteter MCP-Server, der es per IMAP über imap.strato.de auf Port 993 anbindet. Angemeldet wird mit der vollständigen E-Mail-Adresse und dem Passwort dieses Postfachs, nicht mit dem Kundenpasswort für den STRATO Kunden-Login. Danach lesen, suchen, senden und sortieren Claude, ChatGPT oder Cursor die E-Mails. STRATO akzeptiert nur die Authentifizierung „Passwort, normal“ über eine verschlüsselte Verbindung; das ältere Challenge-Response-Verfahren CRAM-MD5 ist abgeschaltet. Jede Firmenadresse, etwa info@ oder vertrieb@, wird als eigenes Postfach verbunden: Ein Postfach ist kostenlos, Personal verbindet drei, Pro bis zu 10 und Business so viele, wie Sie brauchen.",
+    "meta0": "Erstes Postfach kostenlos, Tarife für weitere",
+    "meta1": "E-Mail-Passwort, nicht der Kunden-Login",
+    "meta2": "E-Mails live abgerufen, nie gespeichert"
+  },
+  "persona": {
+    "intro": "Mehrere Firmenpostfächer bei STRATO?",
+    "label": "So viele Postfächer verbindet jeder Tarif",
+    "href": "/pricing"
+  },
+  "method": {
+    "title": "So verbindet sich STRATO: IMAP, nur verschlüsselt, Authentifizierung „Passwort, normal“",
+    "body": "STRATO stellt IMAP unter <code>imap.strato.de</code> auf Port 993 mit SSL/TLS bereit und SMTP unter <code>smtp.strato.de</code> auf Port 465, ebenfalls SSL/TLS. Laut STRATO verwenden alle E-Mail-Postfächer ausschließlich verschlüsselte Verbindungen, unverschlüsselt geht gar nichts, und unterstützt werden nur TLS 1.2 und TLS 1.3. Benutzername ist die vollständige E-Mail-Adresse, Passwort das im Kunden-Login für diese Adresse vergebene E-Mail-Passwort. Das ist ein anderes Passwort als das Kundenpasswort, mit dem Sie sich im STRATO Kunden-Login anmelden. Als Authentifizierungsmethode muss <b>Passwort, normal</b> eingestellt sein: STRATO hat das Challenge-Response-Verfahren CRAM-MD5 abgeschaltet, jedes Programm, das noch darauf steht, scheitert bei der Anmeldung."
+  },
+  "setup": [
+    {
+      "h": "Kostenloses MCPEmails-Konto anlegen",
+      "p": "Registrieren Sie sich auf mcpemails.com. Der Free-Tarif verbindet ein Postfach dauerhaft und fragt nicht nach einer Kreditkarte."
+    },
+    {
+      "h": "E-Mail-Passwort im STRATO Kunden-Login festlegen",
+      "p": "Melden Sie sich im STRATO Kunden-Login an, öffnen Sie unten rechts Ihr Paket und klicken Sie auf E-Mail, dann Verwaltung. Markieren Sie die E-Mail-Adresse, klicken Sie auf Postfach bearbeiten, dann auf Passwort ändern, vergeben Sie ein neues Passwort und speichern Sie. Dieses Passwort gehört allein zum Postfach; es ist nicht das Kundenpasswort, mit dem Sie sich gerade angemeldet haben. Kennen Sie das aktuelle E-Mail-Passwort, können Sie es auch in STRATO Webmail unter den Einstellungen ändern."
+    },
+    {
+      "h": "In MCPEmails einfügen",
+      "p": "Wählen Sie IMAP / SMTP, geben Sie die vollständige Adresse ein und fügen Sie das E-Mail-Passwort ein. Die Server imap.strato.de und smtp.strato.de sowie die Ports 993 und 465 sind vorausgefüllt und wurden über eine echte TLS-Verbindung geprüft."
+    },
+    {
+      "h": "MCP-URL in Ihre KI einfügen",
+      "p": "Fügen Sie https://mcpemails.com/api/mcp in Claude, Cursor oder ChatGPT als Konnektor ein, autorisieren Sie den Zugriff, und Ihr Agent arbeitet im Postfach."
+    }
+  ],
+  "gotchas": [
+    {
+      "h": "STRATO hat CRAM-MD5 abgeschaltet, und alte Clients verlangen es noch",
+      "p": "STRATO unterstützt das MD5-Challenge-Response-Verfahren nicht mehr. In Mailprogrammen heißt die Einstellung oft <b>Verschlüsseltes Passwort</b> oder <b>Sichere Passwort-Authentifizierung</b> und steht in derselben Auswahlliste direkt unter <b>Passwort, normal</b>. Viele haben sie gewählt, in der nachvollziehbaren Annahme, mehr Verschlüsselung sei besser. Jedes Programm und jedes Skript mit dieser Einstellung scheitert jetzt bei der Anmeldung, mit einer Meldung, die sich von falschen Zugangsdaten nicht unterscheidet, obwohl das Passwort stimmt. Richtig ist Passwort, normal über die TLS-Verbindung, die ohnehin von Anfang bis Ende verschlüsselt ist. MCPEmails macht das automatisch so."
+    },
+    {
+      "h": "STRATO kündigt kein SASL-IR an",
+      "p": "Dem IMAP-Server fehlt die Fähigkeit SASL-IR. Er lehnt also die einstufige Authentifizierung ab, bei der die Zugangsdaten in derselben Zeile wie der AUTHENTICATE-Befehl stehen. Ein Client, der SASL-IR voraussetzt, bekommt ein nacktes <code>BAD</code> ohne Erklärung, was wieder wie ein Passwortproblem aussieht. MCPEmails erkennt diese Antwort und wiederholt den Austausch in zwei Schritten, die Verbindung kommt also zustande. Zusammen mit der Abschaltung von CRAM-MD5 erklärt das, warum es bei STRATO so viele Meldungen über ein angeblich falsches Passwort gibt, das in Wahrheit richtig war."
+    },
+    {
+      "h": "STRATO hat den am besten ausgestatteten IMAP-Server seiner Preisklasse",
+      "p": "Für Shared-Hosting-Mail ungewöhnlich, kündigt STRATO MOVE, UIDPLUS, SPECIAL-USE, SORT, QUOTA und LIST-EXTENDED an. In der Praxis heißt das: Verschieben ist ein einziger Befehl statt Kopieren plus Expunge, die neue UID wird zurückgegeben, sodass eine verschobene Nachricht nachverfolgbar bleibt, und Gesendet, Entwürfe, Papierkorb und Spam werden über ihre Rolle erkannt, nicht aus deutschen Ordnernamen geraten. Gesendete E-Mails Ihres Agenten landen damit im richtigen Gesendet-Ordner. Wer einen Hoster für KI-gesteuerte E-Mail aussucht, bekommt hier mehr, als es klingt."
+    },
+    {
+      "h": "Probleme beheben: 100 MB Obergrenze, und die drei Ursachen für ein abgelehntes Passwort",
+      "p": "STRATO meldet auf IMAP ein APPENDLIMIT von 104857600 Byte und denselben Wert als maximale Nachrichtengröße auf SMTP. Das gilt für alles, was ein Agent sendet oder als Entwurf in einen Ordner schreibt; ein zu großer Anhang wird komplett abgelehnt, nicht gekürzt. Lehnt STRATO dagegen die Anmeldung ab, gibt es drei Ursachen, die Sie der Reihe nach ausschließen: Sie haben das Kundenpasswort des Kunden-Logins eingegeben statt des E-Mail-Passworts der Adresse; das E-Mail-Passwort wurde nie vergeben oder ist vergessen, dann im Kunden-Login unter Ihr Paket, E-Mail, Verwaltung, Postfach bearbeiten, Passwort ändern ein neues setzen; oder ein anderes Programm versucht noch CRAM-MD5 oder eine unverschlüsselte Verbindung, die STRATO komplett ablehnt statt herabzustufen. Testen Sie das neue Passwort zuerst in STRATO Webmail: Klappt die Anmeldung dort, klappt sie auch in MCPEmails."
+    }
+  ],
+  "limits": [
+    "Unverschlüsselte Verbindungen werden gar nicht unterstützt, akzeptiert werden nur TLS 1.2 und 1.3. Sehr alte Client-Bibliotheken bekommen keine Sitzung zustande.",
+    "Nachrichten und Uploads sind serverseitig auf 100 MB begrenzt."
+  ],
+  "faq": [
+    {
+      "q": "Funktioniert Claude mit STRATO E-Mail?",
+      "a": "Ja, über einen MCP-Server. Claude selbst hat keinen STRATO-Konnektor. MCPEmails verbindet das STRATO-Postfach per IMAP, danach kann Claude E-Mails lesen, suchen, senden, beantworten, planen und ablegen. Dieselbe Verbindung nutzen Sie in ChatGPT, Cursor und anderen MCP-Clients."
+    },
+    {
+      "q": "Wie lauten die IMAP- und SMTP-Einstellungen von STRATO?",
+      "a": "IMAP ist imap.strato.de auf Port 993 mit SSL/TLS. SMTP ist smtp.strato.de auf Port 465, ebenfalls SSL/TLS. Benutzername ist Ihre vollständige E-Mail-Adresse, Passwort das E-Mail-Passwort des Postfachs, Authentifizierungsmethode Passwort, normal. Beide Server wurden über eine echte TLS-Verbindung bestätigt. Port 587 nennt STRATO nur für Smarthost-Szenarien, nicht für Mailprogramme."
+    },
+    {
+      "q": "Warum wird mein STRATO-Passwort abgelehnt?",
+      "a": "Drei Ursachen, in dieser Reihenfolge prüfen. Erstens: Sie verwenden das Kundenpasswort des STRATO Kunden-Logins statt des E-Mail-Passworts, das für die Adresse vergeben wurde. Zweitens: Das Programm steht auf Verschlüsseltes Passwort oder CRAM-MD5, was STRATO abgeschaltet hat; richtig ist Passwort, normal. Drittens: Das Programm versucht eine unverschlüsselte Verbindung, die STRATO komplett ablehnt. Setzen Sie im Zweifel im Kunden-Login ein neues E-Mail-Passwort und testen Sie es in STRATO Webmail."
+    },
+    {
+      "q": "Braucht STRATO ein App-Passwort?",
+      "a": "Nein. STRATO vergibt keine App-Passwörter für E-Mail, und es gibt keinen IMAP-Schalter pro Postfach, den Sie einschalten müssten. Das im Kunden-Login vergebene E-Mail-Passwort meldet IMAP und SMTP an. Wenn Sie ein bestehendes Passwort nicht weitergeben möchten, vergeben Sie für diese Adresse ein neues."
+    },
+    {
+      "q": "Werden meine STRATO-E-Mails auf Ihren Servern gespeichert?",
+      "a": "Nein. Nachrichten werden bei jeder Anfrage live per IMAP von STRATO abgerufen und an Ihren KI-Client übergeben. Zugangsdaten liegen verschlüsselt, Nachrichteninhalte werden nicht aufbewahrt."
+    }
+  ],
+  "ctaBand": {
+    "title": "Alle STRATO-Postfächer an einem Agenten",
+    "sub": "Ihr erstes STRATO-Postfach kostenlos verbinden, ohne Kreditkarte. Personal verbindet drei, Pro bis zu 10 und Business so viele, wie Sie brauchen."
+  }
+}

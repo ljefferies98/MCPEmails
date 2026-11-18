@@ -1,10 +1,10 @@
 const translation = {
-  title: 'Connecter ChatGPT à vos e-mails avec MCP (Gmail, Outlook, iCloud et IMAP)',
+  title: 'Connecter ChatGPT à vos e-mails : Yahoo, iCloud, Outlook et IMAP',
   description:
     'Pas à pas : connectez Gmail, Outlook, iCloud, Fastmail ou toute boîte IMAP à ChatGPT via un connecteur MCP, et à OpenAI Codex via une clé limitée. Aucun e-mail stocké.',
   coverAlt:
-    'Connecter ChatGPT et OpenAI Codex à Gmail, Outlook, iCloud, Fastmail et aux e-mails IMAP avec MCP Emails',
-  content: `ChatGPT ne peut pas atteindre une boîte e-mail tout seul. Il lui faut un serveur MCP devant votre messagerie, et MCP Emails est ce serveur : connectez une boîte une fois, pointez ChatGPT vers une seule URL, et il dispose des mêmes outils de messagerie que vos e-mails soient chez Gmail, Outlook ou Microsoft 365, iCloud, Fastmail, Yahoo, Zoho ou sur un serveur IMAP auto-hébergé.
+    'Connecter ChatGPT et OpenAI Codex à Gmail, Outlook, iCloud, Fastmail et aux e-mails IMAP avec MCPEmails',
+  content: `ChatGPT ne peut pas atteindre une boîte e-mail tout seul. Il lui faut un serveur MCP devant votre messagerie, et MCPEmails est ce serveur : connectez une boîte une fois, pointez ChatGPT vers une seule URL, et il dispose des mêmes outils de messagerie que vos e-mails soient chez Gmail, Outlook ou Microsoft 365, iCloud, Fastmail, Yahoo, Zoho ou sur un serveur IMAP auto-hébergé.
 
 Deux surfaces OpenAI sont concernées, et elles s'authentifient différemment. ChatGPT exécute un flux OAuth dans le navigateur : aucune clé API à coller. OpenAI Codex tourne dans votre terminal et utilise plutôt une clé limitée comme jeton bearer. Même endpoint, mêmes outils.
 
@@ -12,23 +12,23 @@ Deux surfaces OpenAI sont concernées, et elles s'authentifient différemment. C
 
 ## Ce dont vous avez besoin
 
-- **ChatGPT Plus, Pro, Business, Enterprise ou Edu, sur le web.** Les connecteurs MCP personnalisés passent par le mode développeur, qu'OpenAI propose sur chatgpt.com pour ces abonnements. Les comptes Free et Go ne peuvent pas en ajouter, et les apps mobile et de bureau n'affichent pas l'option. Sur Business et Enterprise, un administrateur doit parfois d'abord autoriser le mode développeur.
-- **Un compte MCP Emails gratuit.** [Créez-le ici](/signup). L'offre gratuite accepte une boîte connectée et ne demande pas de carte.
+- **Un abonnement ChatGPT payant, sur le web.** La [page d'aide d'OpenAI sur les serveurs MCP personnalisés](https://help.openai.com/en/articles/12584461) les propose pour les espaces de travail Business et Enterprise/Edu sur chatgpt.com, avec les outils de lecture et de récupération seulement sur Pro ; elle ne mentionne ni Go ni Plus. Impossible d'en ajouter un depuis l'app mobile. Sur Business et Enterprise, un administrateur ou propriétaire l'ajoute et le publie pour l'espace de travail.
+- **Un compte MCPEmails gratuit.** [Créez-le ici](/signup). L'offre gratuite accepte une boîte connectée et ne demande pas de carte.
 - **Une boîte e-mail.** Gmail, Outlook ou Microsoft 365, iCloud, Fastmail, Yahoo, Zoho, Yandex, ou tout service parlant IMAP et SMTP.
 
-Si vous êtes sur Free ou Go, la même boîte et la même URL fonctionnent déjà dans [Claude](/docs/claude), [Cursor](/docs/cursor), [VS Code](/docs/vscode) et les autres [clients pris en charge](/docs/clients).
+Si votre abonnement ChatGPT ne permet pas d'ajouter un serveur MCP personnalisé, la même boîte et la même URL fonctionnent déjà dans [Claude](/docs/claude), [Cursor](/docs/cursor), [VS Code](/docs/vscode) et les autres [clients pris en charge](/docs/clients).
 
-## Étape 1 : Connecter votre boîte à MCP Emails
+## Étape 1 : Connecter votre boîte à MCPEmails
 
-Dans le tableau de bord MCP Emails, ouvrez **Inboxes**, puis **Connect Inbox**, puis choisissez votre fournisseur.
+Dans le tableau de bord MCPEmails, ouvrez **Inboxes**, puis **Connect Inbox**, puis choisissez votre fournisseur.
 
 ### Gmail et Google Workspace
 
-Gmail se connecte par défaut avec un mot de passe d'application Google en IMAP, et la connexion Google OAuth est également disponible. Utilisez le mot de passe d'application si un administrateur Workspace restreint l'accès des applications tierces. Le [guide Gmail](/blog/connect-gmail-to-claude) détaille les étapes.
+Gmail se connecte avec un mot de passe d'application Google en IMAP. Activez la validation en deux étapes, créez le mot de passe d'application sur myaccount.google.com/apppasswords et collez les 16 lettres avec votre adresse Gmail complète ; votre mot de passe Google habituel ne fonctionne pas. Un administrateur Google Workspace peut désactiver les mots de passe d'application pour le domaine : demandez-lui si l'option n'apparaît pas. Le [guide Gmail](/blog/connect-gmail-to-claude) détaille les étapes.
 
 ### iCloud, Fastmail, Yahoo et Zoho
 
-Ces fournisseurs demandent un mot de passe spécifique à l'application, pas celui que vous tapez sur le web. Créez-le chez le fournisseur, choisissez ce fournisseur dans MCP Emails et collez-le. Le [guide iCloud, Fastmail et IMAP](/blog/connect-icloud-fastmail-imap-to-claude) donne les étapes exactes.
+Ces fournisseurs demandent un mot de passe spécifique à l'application, pas celui que vous tapez sur le web. Créez-le chez le fournisseur, choisissez ce fournisseur dans MCPEmails et collez-le. Le [guide iCloud, Fastmail et IMAP](/blog/connect-icloud-fastmail-imap-to-claude) donne les étapes exactes.
 
 ### Outlook et Microsoft 365
 
@@ -42,24 +42,27 @@ Connectez plusieurs boîtes si votre forfait le permet. ChatGPT les découvre av
 
 ## Étape 2 : Ajouter le connecteur dans ChatGPT
 
-1. Activez le **mode développeur** dans les réglages de ChatGPT, sous les paramètres avancés des applications et connecteurs.
-2. Créez un nouveau connecteur et donnez-lui un nom.
-3. Collez cette URL de connecteur :
+**Le plus simple : l'annuaire de plugins.** Depuis le 16 novembre 2026, MCPEmails figure dans l'annuaire de plugins de ChatGPT sous le nom **Any Mailbox**. Dans ChatGPT, ouvrez **Plugins**, cherchez Any Mailbox, cliquez sur **Install plugin**, puis sur **Connect**, et connectez-vous à MCPEmails. La possibilité d'installer un plugin dépend de votre offre ChatGPT, de votre espace de travail, de votre rôle et de votre région. Si vous ne pouvez pas l'installer, ajoutez un serveur MCP personnalisé avec les étapes ci-dessous.
+
+1. Sur chatgpt.com, ouvrez **Plugins**, puis **Personal**, et cliquez sur **Add** en haut à droite.
+2. Choisissez **Add custom MCP server** et nommez-le MCPEmails.
+3. Sous **Connection**, collez cette URL :
 
 \`\`\`
 https://mcpemails.com/api/mcp
 \`\`\`
 
-4. Choisissez **OAuth** comme méthode d'authentification, créez le connecteur, puis autorisez avec MCP Emails.
-5. Ouvrez une nouvelle conversation, cliquez sur **+**, choisissez **Developer mode** et sélectionnez l'app MCP Emails. ChatGPT ne voit les outils que dans une conversation où vous l'avez fait, donc recommencez dans chaque nouvelle conversation.
+4. Choisissez **OAuth**, cochez **I understand and want to continue** et cliquez sur **Create as a plugin**.
+5. Connectez-vous avec MCPEmails et approuvez.
+6. Dans une conversation, tapez **@** et choisissez MCPEmails. Ce choix vaut pour ce message : mentionnez à nouveau MCPEmails avec @ quand une question de suivi a besoin de vos e-mails.
 
-Choisissez OAuth, pas l'option sans authentification. Ce serveur refuse les appels anonymes : un connecteur créé sans authentification semble correct à la configuration puis échoue à son premier appel d'outil, ce qui est l'ordre le plus déroutant. Avec OAuth, ChatGPT s'enregistre lui-même et réalise un flux de code d'autorisation avec PKCE : aucun client id à créer, aucun secret nulle part. La formulation des menus évolue au fil de la bêta, alors consultez la [page de configuration ChatGPT](/docs/chatgpt) pour le chemin actuel.
+Choisissez OAuth, pas l'option sans authentification. Ce serveur refuse les appels anonymes : un connecteur créé sans authentification semble correct à la configuration puis échoue à son premier appel d'outil, ce qui est l'ordre le plus déroutant. Avec OAuth, ChatGPT s'enregistre lui-même et réalise un flux de code d'autorisation avec PKCE : aucun client id à créer, aucun secret nulle part. OpenAI déplace ces menus de temps en temps, alors consultez la [page de configuration ChatGPT](/docs/chatgpt) pour le chemin actuel.
 
 ## Étape 3 : N'accordez que les scopes nécessaires
 
-L'écran de consentement est le nôtre, pas celui d'OpenAI. Le premier consentement démarre à \`read:email\`, ce qui suffit pour trier, résumer et retrouver des choses, et met toute action irréversible hors de portée le temps que vous décidiez jusqu'où aller. Les autres scopes sont \`send:email\`, \`search:email\` et \`manage:automations\`.
+L'écran de consentement est le nôtre, pas celui d'OpenAI. Pour ChatGPT, il s'ouvre sur **Accès complet**, parce que ChatGPT ne revient pas plus tard demander davantage d'accès. Choisissez un niveau plus restreint avant de cliquer sur **Autoriser l'accès** si vous le souhaitez : **Lecture seule** suffit pour trier, résumer et retrouver des choses, et met toute action irréversible hors de portée. **Personnaliser les autorisations** liste les neuf autorisations (lecture, recherche, envoi, dossiers, suppression, brouillons, contacts, planification et automatisations). Par défaut, l'écran donne aussi accès à toutes les boîtes de l'espace de travail, y compris celles que vous connecterez plus tard ; choisissez-y des boîtes précises pour le limiter.
 
-En accorder trop peu se rattrape : un appel qui exige un scope absent du jeton renvoie un 403 avec une erreur de scope insuffisant, le client peut donc redemander ce scope précis et réessayer. Le propriétaire d'une boîte peut aussi exiger une [approbation humaine](/blog/approve-ai-agent-email-sends) dans le tableau de bord, qui retient chaque envoi, réponse, transfert, envoi de brouillon et envoi planifié jusqu'à ce qu'une personne le libère.
+En accorder trop peu se rattrape. Quand un outil a besoin d'une autorisation qui manque à la connexion de ChatGPT, le résultat de l'outil indique laquelle et demande à ChatGPT de se reconnecter. Le propriétaire d'une boîte peut aussi exiger une [approbation humaine](/blog/approve-ai-agent-email-sends) dans le tableau de bord, qui retient chaque envoi, réponse, transfert, envoi de brouillon et envoi planifié jusqu'à ce qu'une personne le libère.
 
 ## Étape 4 : Donnez à ChatGPT une première tâche sûre
 
@@ -77,15 +80,15 @@ Pour des routines réutilisables, partez du [guide de tri de boîte de réceptio
 
 ## Ce que ChatGPT peut faire une fois connecté
 
-MCP Emails donne à ChatGPT des outils ciblés plutôt qu'un mot de passe ou une connexion IMAP brute :
+MCPEmails donne à ChatGPT des outils ciblés plutôt qu'un mot de passe ou une connexion IMAP brute :
 
-- **Lire et rechercher :** \`email_read\` couvre list, read, read_batch, search et attachment. Les recherches Gmail acceptent des opérateurs comme \`from:\` et \`is:unread\`.
+- **Lire et rechercher :** \`email_read\` couvre list, read, read_batch, search et attachment. La recherche utilise des champs structurés comme l'expéditeur, l'objet, la date et le statut non lu, et les libellés Gmail apparaissent comme des dossiers.
 - **Envoyer, répondre et transférer :** \`email_compose\` envoie via votre propre fournisseur et votre propre adresse.
 - **Organiser :** \`email_organize\`, \`email_search_and_move\` et \`email_delete\`.
 - **Brouillons, dossiers et planification :** \`draft\`, \`draft_list\`, \`folder\`, \`folder_list\`, \`schedule\` et \`schedule_list\`.
 - **Le reste :** \`contact_search\`, \`signature_get\`, \`signature_set\`, plus \`automation\` et \`automation_read\` pour les règles récurrentes.
 
-Une limite à anticiper : MCP Emails fonctionne par interrogation. Il n'y a ni webhooks ni événements initiés par le serveur, donc ChatGPT vérifie les nouveaux e-mails quand vous le lui demandez, pas au moment où un message arrive.
+Une limite à anticiper : dans une conversation, ChatGPT vérifie les nouveaux e-mails quand vous le lui demandez, pas au moment où un message arrive. Rien dans le connecteur ne réveille ChatGPT de lui-même. (Votre propre code, lui, peut être réveillé : les espaces de travail Pro et Business peuvent ajouter sous Clés API un webhook qui envoie un POST à votre URL quand un nouveau message arrive.)
 
 ## OpenAI Codex dans le terminal
 
@@ -101,9 +104,9 @@ Limitez la clé au strict nécessaire. La lecture seule est généralement le bo
 
 ## Dépannage
 
-- **Aucune option pour créer un connecteur personnalisé.** Le mode développeur exige Plus, Pro, Business, Enterprise ou Edu, sur chatgpt.com dans un navigateur. Les comptes Free et Go ne l'ont pas. Dans un espace Business ou Enterprise, un administrateur doit l'autoriser.
+- **Aucune option pour ajouter un serveur MCP personnalisé.** Les serveurs MCP personnalisés s'ajoutent sur chatgpt.com dans un navigateur, pas dans l'app mobile. OpenAI les propose pour Business et Enterprise/Edu, avec les outils de lecture et de récupération seulement sur Pro, donc dans un espace Business ou Enterprise un administrateur ou propriétaire doit parfois l'ajouter.
 - **Le connecteur échoue à son premier appel d'outil.** Il a probablement été créé sans authentification. Supprimez-le et recréez-le avec OAuth.
-- **Le connecteur est créé, mais ChatGPT répond sans toucher à vos e-mails.** Il n'est pas activé dans cette conversation. Cliquez sur **+**, choisissez **Developer mode**, sélectionnez l'app MCP Emails, puis reposez la question.
+- **Le connecteur est créé, mais ChatGPT répond sans toucher à vos e-mails.** MCPEmails n'a pas été choisi pour ce message. Tapez **@**, choisissez MCPEmails, puis reposez la question.
 - **Le fournisseur refuse votre mot de passe.** Utilisez un mot de passe d'application généré par le fournisseur, pas votre mot de passe web. Certains fournisseurs n'en délivrent qu'une fois l'authentification à deux facteurs activée.
 - **Une connexion IMAP personnalisée expire.** Vérifiez l'hôte, le port et le mode TLS. Le port 993 utilise normalement TLS implicite ; le port 143 utilise généralement STARTTLS.
 - **ChatGPT se connecte mais ne voit aucun e-mail.** Vérifiez que la boîte est active dans le tableau de bord, que la connexion détient \`read:email\`, et demandez à ChatGPT d'appeler d'abord \`inbox_list\`.
@@ -123,7 +126,7 @@ Non. Codex est une surface en terminal : il utilise une clé API limitée dans u
 Non. Chaque message est récupéré en direct chez votre fournisseur pour la requête qui l'a demandé, puis supprimé. Seul l'identifiant chiffré du fournisseur est conservé. [Pourquoi ne jamais stocker les e-mails compte](/blog/why-email-never-stored-matters) explique le raisonnement.
 
 **Combien cela coûte-t-il ?**
-L'offre gratuite couvre une boîte connectée et 150 actions e-mail facturables par mois calendaire UTC, les 7 premiers jours n'étant pas comptés. Ce plafond mensuel s'applique aux espaces de travail créés à partir du 2026-09-13 ; ceux créés avant en sont exemptés. Les forfaits payants ajoutent des boîtes et suppriment le plafond : voir les [tarifs](/pricing).
+L'offre gratuite couvre une boîte connectée, avec les limites indiquées sur la page des [tarifs](/pricing). Les forfaits payants ajoutent des boîtes.
 
 ## Étape suivante
 

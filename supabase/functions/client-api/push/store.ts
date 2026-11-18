@@ -90,6 +90,12 @@ export interface PushStore {
   }): Promise<void>;
   /** Rows of this user, in any workspace, disabled ones included (the cap counts them all). */
   countSubscriptions(userId: string): Promise<number>;
+  /**
+   * Delete this user's DISABLED rows (the push service said "gone", or ten
+   * failures in a row). Run when the cap is reached, so dead browsers do not
+   * hold device slots forever. Returns how many rows went.
+   */
+  purgeDisabledSubscriptions(userId: string): Promise<number>;
   /** Delete this user's row for the endpoint. Returns how many rows went. */
   deleteSubscription(userId: string, endpoint: string): Promise<number>;
   /** This user's active subscriptions in one workspace. */
@@ -103,12 +109,34 @@ export interface PushStore {
   leaseWatches(limit: number, leaseSeconds: number): Promise<LeasedWatch[]>;
   /** Write a check's result and give the lease back. A no-op unless `leaseId` still holds the row. */
   releaseWatch(inboxId: string, leaseId: string, result: WatchResult): Promise<void>;
+  /**
+   * Who to tell about new mail in this inbox: members with a live
+   * subscription who may SEE the inbox (the visibility rule, ../visibility.ts).
+   * Throws when visibility cannot be read, so nobody is told rather than everybody.
+   */
   recipients(inboxId: string): Promise<Recipient[]>;
   recordPushResults(results: PushResults): Promise<void>;
 }
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
+
+/**
+ * `push_recipients` (migration 20261005100100) checks membership, not the
+ * inbox's visibility: keep only the people the rule lets see it. A company
+ * inbox goes to every member it listed; a private one to its owner only; a
+ * row without a readable visibility to nobody.
+ */
+export function visibleRecipients(
+  rows: Recipient[],
+  inbox: { visibility?: unknown; owner_user_id?: unknown } | null,
+): Recipient[] {
+  if (!inbox) return [];
+  if (inbox.visibility === "company") return rows;
+  if (inbox.visibility !== "private" || typeof inbox.owner_user_id !== "string") return [];
+  const owner = inbox.owner_user_id.toLowerCase();
+  return rows.filter((row) => String(row.user_id).toLowerCase() === owner);
+}
 
 const SUBSCRIPTION_COLUMNS = "id, user_id, workspace_id, endpoint, p256dh, auth, disabled_at";
 
@@ -160,6 +188,17 @@ export function supabasePushStore(db: Db): PushStore {
         .eq("user_id", userId);
       if (error) fail("push_count_failed", error);
       return count ?? 0;
+    },
+
+    async purgeDisabledSubscriptions(userId) {
+      const { data, error } = await db
+        .from("push_subscriptions")
+        .delete()
+        .eq("user_id", userId)
+        .not("disabled_at", "is", null)
+        .select("id");
+      if (error) fail("push_purge_failed", error);
+      return Array.isArray(data) ? data.length : 0;
     },
 
     async deleteSubscription(userId, endpoint) {
@@ -253,7 +292,15 @@ export function supabasePushStore(db: Db): PushStore {
     async recipients(inboxId) {
       const { data, error } = await db.rpc("push_recipients", { p_inbox_id: inboxId });
       if (error) fail("push_recipients_failed", error);
-      return (data ?? []) as Recipient[];
+      const rows = (data ?? []) as Recipient[];
+      if (rows.length === 0) return rows;
+      const acl = await db
+        .from("inboxes")
+        .select("visibility, owner_user_id")
+        .eq("id", inboxId)
+        .maybeSingle();
+      if (acl.error) fail("push_recipients_visibility_failed", acl.error);
+      return visibleRecipients(rows, acl.data ?? null);
     },
 
     async recordPushResults(results) {

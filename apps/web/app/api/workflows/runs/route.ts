@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceRoleClient } from '@/lib/supabase/service';
 import { resolveActiveWorkspaceId } from '@/lib/workspace/active';
+import { canManageWorkspace, canOperateWorkspace, fetchWorkspaceRole, insufficientRoleBody } from '@/lib/workspace/roles';
 
 /** Operational metadata only; email content is never selected or returned. */
 type BulkRunSummary = {
@@ -24,14 +25,27 @@ async function getContext() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return null;
   const workspaceId = await resolveActiveWorkspaceId(supabase, user.id);
-  return workspaceId ? { workspaceId } : null;
+  return workspaceId ? { workspaceId, userId: user.id, supabase } : null;
 }
+
+/**
+ * Shown to a viewer who tries to stop a run. Viewers are read-only (see
+ * lib/workspace/roles.ts); stopping a run changes what happens to the
+ * workspace's mailboxes, so it is an operator action.
+ */
+const VIEWER_CANNOT_STOP_RUN =
+  'Viewers can watch large-work runs but cannot stop them. Ask a workspace owner, admin or member to stop this run.';
 
 export async function GET() {
   const context = await getContext();
   if (!context) return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
 
-  const db = createServiceRoleClient();
+  // Owners and admins see every run in the workspace (operational metadata,
+  // never mail content). Everyone else reads through RLS, which since the
+  // Business privacy model (20261111190000) hides runs on other people's
+  // private inboxes.
+  const role = await fetchWorkspaceRole(context.supabase, context.workspaceId, context.userId);
+  const db = canManageWorkspace(role) ? createServiceRoleClient() : context.supabase;
   const { data, error } = await db
     .from('bulk_runs')
     .select('id, inbox_id, operation, status, total, processed, succeeded, failed, cancel_requested_at, created_at, completed_at, error_code, inboxes(email_address, display_name)')
@@ -55,6 +69,27 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const id = body && typeof body.id === 'string' ? body.id : null;
   if (!id) return NextResponse.json({ error: 'A run id is required.' }, { status: 400 });
+
+  // Membership alone is not permission. The role is read with the USER client
+  // (as roles.ts requires) BEFORE the service-role write below, which bypasses
+  // RLS and would otherwise cancel any running row in the workspace.
+  const role = await fetchWorkspaceRole(context.supabase, context.workspaceId, context.userId);
+  if (!canOperateWorkspace(role)) {
+    return NextResponse.json(insufficientRoleBody(VIEWER_CANNOT_STOP_RUN), { status: 403 });
+  }
+
+  // A member may stop only a run they can see: the RLS read hides runs on
+  // other people's private inboxes (20261111190000). Owners and admins may
+  // stop any run, as before.
+  if (!canManageWorkspace(role)) {
+    const { data: visibleRun } = await context.supabase
+      .from('bulk_runs')
+      .select('id')
+      .eq('id', id)
+      .eq('workspace_id', context.workspaceId)
+      .maybeSingle();
+    if (!visibleRun) return NextResponse.json({ error: 'This run has already finished or is unavailable.' }, { status: 409 });
+  }
 
   const db = createServiceRoleClient();
   const now = new Date().toISOString();

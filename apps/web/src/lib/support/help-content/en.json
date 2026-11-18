@@ -1,0 +1,286 @@
+{
+  "meta": {
+    "title": "Help and support",
+    "description": "Answers to the most common connection, client and billing questions, and a form to reach the people who build MCPEmails."
+  },
+  "hero": {
+    "eyebrow": "Help",
+    "title": "How can we help?",
+    "lead": "Search the guides, open a topic below, or write to us."
+  },
+  "search": {
+    "label": "Search help",
+    "placeholder": "Type a question or a word",
+    "empty": "No match.",
+    "emptyLink": "Write to us below",
+    "kinds": {
+      "provider": "Provider",
+      "client": "Client",
+      "docs": "Docs",
+      "faq": "FAQ",
+      "article": "Article"
+    }
+  },
+  "nav": {
+    "label": "Help topics",
+    "contact": "Contact us"
+  },
+  "feedback": {
+    "question": "Was this helpful?",
+    "yes": "Yes",
+    "no": "No",
+    "thanks": "Thanks for letting us know.",
+    "thanksNo": "Thanks. Tell us what was missing and we will fix it.",
+    "contactLink": "Write to us",
+    "change": "Change answer"
+  },
+  "hints": {
+    "provider": "{category} · {domain}",
+    "providerNoDomain": "{category}",
+    "clientOauth": "Setup guide · OAuth sign-in, no API key",
+    "clientKey": "Setup guide · scoped API key",
+    "docs": "Documentation",
+    "docsProviders": "Settings and support for every provider",
+    "docsClients": "Setup guides for every MCP client",
+    "faq": "Pricing FAQ"
+  },
+  "providerCategories": {
+    "generic": "Any IMAP mailbox",
+    "consumer": "Webmail",
+    "privacy": "Privacy-focused mail",
+    "business": "Business mail",
+    "hosting": "Web host with mail",
+    "cpanel": "cPanel and shared hosting",
+    "selfhost": "Self-hosted mail server",
+    "isp": "Internet provider",
+    "regional": "Regional mail",
+    "blocked": "Limited or unsupported"
+  },
+  "articlesHeading": "Common fixes",
+  "articlesLead": "The problems people write to us about most, and what fixes them.",
+  "articles": [
+    {
+      "id": "imap-password-rejected",
+      "title": "The mail server rejects my password",
+      "summary": "Almost always the wrong password or username. Use the mailbox's own login.",
+      "keywords": "imap smtp password rejected wrong login username cpanel plesk hosting own domain auth failed smtp error send failed error",
+      "steps": [
+        "Use the mailbox password, not your hosting or control panel login.",
+        "Use the full email address as the username.",
+        "If the mailbox has two-factor sign-in, use an app password.",
+        "Reset the password where your host lists email accounts (cPanel: Email Accounts).",
+        "Check the server names against our provider guides."
+      ],
+      "links": [
+        {
+          "label": "Generic IMAP guide",
+          "href": "/connect/imap"
+        },
+        {
+          "label": "Provider compatibility",
+          "href": "/docs/providers"
+        }
+      ]
+    },
+    {
+      "id": "app-password-required",
+      "title": "App password needed (Yahoo, iCloud, Gmail, Zoho)",
+      "summary": "These providers refuse your normal password here. Create an app password and paste it.",
+      "keywords": "app password app-specific application-specific yahoo icloud apple gmail google zoho 2-step verification two factor 2fa two-step mfa",
+      "steps": [
+        "Yahoo: Account Security, then Generate app password.",
+        "iCloud: account.apple.com, Sign-In and Security, then App-Specific Passwords.",
+        "Gmail: turn on 2-Step Verification, then visit myaccount.google.com/apppasswords.",
+        "Zoho: create an application-specific password, and turn IMAP on in Zoho Mail settings.",
+        "Paste it as shown. Spaces are ignored."
+      ],
+      "links": [
+        {
+          "label": "Yahoo Mail guide",
+          "href": "/connect/yahoo"
+        },
+        {
+          "label": "iCloud Mail guide",
+          "href": "/connect/icloud"
+        },
+        {
+          "label": "Gmail guide",
+          "href": "/connect/gmail"
+        },
+        {
+          "label": "Zoho Mail guide",
+          "href": "/connect/zoho"
+        }
+      ]
+    },
+    {
+      "id": "yandex-imap-disabled",
+      "title": "Yandex: IMAP access is switched off",
+      "summary": "Yandex refuses mail apps until IMAP is on. It looks like a wrong password.",
+      "keywords": "yandex imap disabled off app password mail clients yandex 360",
+      "steps": [
+        "In Yandex Mail, open Settings, then Mail clients.",
+        "Enable IMAP access, plus app passwords and OAuth tokens.",
+        "At id.yandex.com, create an app password of type Mail.",
+        "Connect with your full address and that app password."
+      ],
+      "links": [
+        {
+          "label": "Yandex Mail guide",
+          "href": "/connect/yandex"
+        }
+      ]
+    },
+    {
+      "id": "assistant-sees-nothing",
+      "title": "Connected, but the assistant sees no mail",
+      "summary": "The mailbox is connected, but your assistant says it has no email tools or finds nothing.",
+      "keywords": "no tools nothing empty connector not working claude chatgpt cursor developer mode scope inbox_list plugin any mailbox @",
+      "steps": [
+        "Open Inboxes in the dashboard and check that the mailbox is listed without an error. If it shows one, reconnect it.",
+        "Start a new chat after adding the connector. In Claude, check that MCPEmails is switched on under + and Connectors. In ChatGPT, type @ and pick Any Mailbox (or MCPEmails, for a custom MCP server), and @mention it again when a follow-up needs your mail.",
+        "Authorize the connector with the same MCPEmails account that holds the mailbox.",
+        "Your assistant only sees the tools your connector or API key is scoped for. If you left a scope unticked, remove the connector and add it again.",
+        "Ask the assistant to list your inboxes first. Mail is fetched when the assistant asks for it, so nothing arrives on its own."
+      ],
+      "links": [
+        {
+          "label": "Client setup guides",
+          "href": "/docs/clients"
+        },
+        {
+          "label": "Error codes",
+          "href": "/docs#errors"
+        }
+      ]
+    },
+    {
+      "id": "usage-limit-reached",
+      "title": "Usage limit reached",
+      "summary": "Free includes 150 email actions a month. After that, actions wait until the 1st (UTC).",
+      "keywords": "usage limit allowance cap 150 actions free plan refused reset quota",
+      "steps": [
+        "See how many actions you have used under Usage in the dashboard.",
+        "Listing your inboxes and anything you do in the dashboard are never counted, and nothing is counted in your first 3 days after signup.",
+        "Retrying does not help. The allowance resets on the 1st of the next month (UTC), and paused automations resume on their own.",
+        "Personal, Pro and Business have unlimited email actions, subject to fair use."
+      ],
+      "links": [
+        {
+          "label": "Pricing FAQ",
+          "href": "/pricing#faq"
+        },
+        {
+          "label": "Rate limits",
+          "href": "/docs#rate-limits"
+        }
+      ]
+    },
+    {
+      "id": "change-or-cancel-plan",
+      "title": "Change or cancel your plan",
+      "summary": "Change or cancel any time in Settings, under Billing & plan.",
+      "keywords": "plan upgrade downgrade cancel subscription billing invoice refund stripe portal payment card",
+      "steps": [
+        "Open Settings, then Billing & plan.",
+        "Choose Manage billing to cancel, change your card or get invoices.",
+        "Cancelling stops renewal. You keep your plan until the period ends.",
+        "Unexpected first charge? Write to us within 14 days for a full refund."
+      ],
+      "links": [
+        {
+          "label": "Dashboard settings",
+          "href": "/dashboard/settings"
+        },
+        {
+          "label": "Plans and pricing",
+          "href": "/pricing"
+        }
+      ]
+    },
+    {
+      "id": "disconnect-or-delete",
+      "title": "Disconnect a mailbox or delete your account",
+      "summary": "Remove one mailbox, one workspace or your whole account from the dashboard.",
+      "keywords": "disconnect remove inbox mailbox delete account workspace close danger zone",
+      "steps": [
+        "Mailbox: in Inboxes, click it and choose Disconnect. Its stored credential is removed.",
+        "Workspace: in Settings, under Workspace, choose Delete workspace.",
+        "Account: in Settings, under Danger zone, choose Delete account. This cannot be undone.",
+        "Each of these cancels the scheduled emails still waiting to send from the mailboxes removed. Deleting the account also asks Google to end our access to any Gmail inbox connected with Google sign-in, and we email you a confirmation.",
+        "Deleting the account cancels a paid plan at once. Unused time is not refunded automatically: within 14 days of a first charge, write to us. To use the time you paid for, cancel first and delete later."
+      ],
+      "links": [
+        {
+          "label": "Dashboard inboxes",
+          "href": "/dashboard/inboxes"
+        },
+        {
+          "label": "Dashboard settings",
+          "href": "/dashboard/settings"
+        }
+      ]
+    }
+  ],
+  "contact": {
+    "heading": "Write to us",
+    "lead": "We reply by email within one business day.",
+    "emailLine": "Email us at {email}, or send a message here.",
+    "openForm": "Write a message"
+  },
+  "categories": {
+    "connect": "Connecting a mailbox",
+    "client": "Setting up an AI client",
+    "billing": "Billing and plans",
+    "bug": "Something is broken",
+    "feature": "Feature request",
+    "other": "Something else"
+  },
+  "form": {
+    "category": "Topic",
+    "subject": "Subject",
+    "message": "Message",
+    "email": "Your email",
+    "emailSignedIn": "We reply to",
+    "submit": "Send message",
+    "sending": "Sending…",
+    "subjectConnect": "Trouble connecting {provider}",
+    "aboutProvider": "About: {provider}"
+  },
+  "attach": {
+    "summary": "What we attach to your message",
+    "intro": "So we can help without asking back and forth, this is sent with your message:",
+    "workspace": "Workspace",
+    "plan": "Plan",
+    "mailboxes": "Mailboxes",
+    "noMailboxes": "No mailboxes connected",
+    "lastError": "last error: {code}",
+    "from": "Opened from",
+    "provider": "Provider",
+    "code": "Error code",
+    "never": "Never attached: passwords, tokens or the content of your mail.",
+    "healthConnected": "Connected",
+    "healthPending": "Pending",
+    "healthNeedsReconnect": "Needs reconnect",
+    "healthUnavailable": "Cannot be used"
+  },
+  "errors": {
+    "invalid_json": "Something went wrong sending the form. Reload the page and try again.",
+    "invalid_email": "Enter a valid email address so we can reply.",
+    "invalid_category": "Choose a topic.",
+    "subject_required": "Add a subject.",
+    "subject_too_long": "The subject is too long. Keep it under 150 characters.",
+    "message_required": "Write a message.",
+    "message_too_long": "The message is too long. Keep it under 5,000 characters.",
+    "invalid_form_token": "This page has been open too long. Reload it and send again.",
+    "rate_limited": "Too many messages in a short time. Wait a while, or write to support@mcpemails.com.",
+    "server_error": "We could not save your message. Try again, or write to support@mcpemails.com.",
+    "not_found": "The contact form is not available right now. Write to support@mcpemails.com.",
+    "network": "Could not reach us. Check your connection and try again.",
+    "unknown": "Something went wrong. Try again, or write to support@mcpemails.com."
+  },
+  "success": {
+    "withRef": "Thanks, we have your message. Your reference is {ref}. We reply by email.",
+    "noRef": "Thanks, we have your message. We reply by email."
+  }
+}

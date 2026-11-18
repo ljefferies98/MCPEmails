@@ -4,7 +4,8 @@ import { resolveActiveWorkspaceId } from '@/lib/workspace/active';
 import { randomBytes } from 'crypto';
 import { createServiceRoleClient } from '@/lib/supabase/service';
 import { recordProductFunnelEvent } from '@/lib/analytics/product-funnel';
-import { OUTLOOK_SCOPES, outlookAuthorizeEndpoint, shouldForceConsent } from '@/lib/email-providers/outlook-oauth';
+import { OUTLOOK_SCOPES, outlookAuthorizeEndpoint, outlookAuthorizePrompt } from '@/lib/email-providers/outlook-oauth';
+import { ONBOARDING_RETURN_COOKIE, ONBOARDING_RETURN_TTL_SECONDS, onboardingReturnCookieValue } from '@/lib/onboarding/outlook-return';
 
 /**
  * GET /auth/outlook
@@ -132,12 +133,26 @@ export async function GET(request: Request): Promise<NextResponse> {
   // reattaching, which is why the login hint doubles as the reconnect signal.
   const isReconnect = loginHint !== null;
 
-  if (shouldForceConsent(isReconnect)) {
-    params.set('prompt', 'consent');
-  }
+  params.set('prompt', outlookAuthorizePrompt(isReconnect));
   if (loginHint) {
     params.set('login_hint', loginHint);
   }
 
-  return NextResponse.redirect(`${outlookAuthorizeEndpoint()}?${params.toString()}`);
+  const response = NextResponse.redirect(`${outlookAuthorizeEndpoint()}?${params.toString()}`);
+  // Started on /onboarding: the callback sends the user back there
+  // (lib/onboarding/outlook-return.ts). Scoped to /auth/outlook, gone in 15 min.
+  // With ?return_to=/authorize?… (the inbox step inside OAuth consent) it goes
+  // back to that consent screen instead; anything but an /authorize path is
+  // ignored.
+  const startUrl = new URL(request.url);
+  if (startUrl.searchParams.get('from') === 'onboarding') {
+    response.cookies.set(ONBOARDING_RETURN_COOKIE, onboardingReturnCookieValue(startUrl.searchParams.get('return_to')), {
+      path: '/auth/outlook',
+      maxAge: ONBOARDING_RETURN_TTL_SECONDS,
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+    });
+  }
+  return response;
 }

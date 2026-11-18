@@ -23,10 +23,15 @@
  * See: Documents/Architecture/imap-smtp-connection-management.md
  */
 
+import type * as net from 'net';
 import * as tls from 'tls';
+import { mailRelayConfigFromEnv, openMailRelayTunnel, relayForMailHost } from './mail-relay.ts';
+import { relayRouteForHost } from './relay-fallback.ts';
 import { decodeModifiedUtf7, encodeModifiedUtf7 } from './utf7.ts';
+import { legacyTlsOptions } from './legacy-tls.ts';
 import {
   chooseImapPasswordMechanism,
+  shouldRetryPlainWithLogin,
   cramMd5Response,
   imapLoginArgument,
   parseImapCapabilities,
@@ -212,6 +217,25 @@ export interface ImapSession {
    * @param pattern - Mailbox name with wildcards, e.g. '*' for all mailboxes
    */
   list(refName: string, pattern: string): Promise<ImapMailboxInfo[]>;
+
+  /**
+   * APPEND one RFC 5322 message to a mailbox (RFC 3501 6.3.11), sent as a
+   * synchronizing literal. `flags` are system flags such as '\\Draft'.
+   *
+   * Used by exactly one caller today: the first-30-days note, which saves a
+   * draft into our own mailbox (src/lib/retention/first-30-days-draft.ts).
+   *
+   * @throws ImapNoError when the server refuses the literal or the APPEND
+   */
+  append(mailbox: string, message: string, flags?: string[]): Promise<void>;
+
+  /**
+   * STATUS for one mailbox (RFC 3501 6.3.10), without selecting it, e.g.
+   * status('INBOX', ['MESSAGES', 'UIDNEXT']) -> { MESSAGES: 231, UIDNEXT: 4429 }.
+   * Numeric items only. Used by the onboarding proof card
+   * (app/api/onboarding/inbox-proof).
+   */
+  status(mailbox: string, items: readonly string[]): Promise<Record<string, number>>;
 
   /**
    * Send LOGOUT and destroy the socket.
@@ -607,6 +631,25 @@ function tokeniseImap(raw: string): Array<string | string[]> {
   return result;
 }
 
+/**
+ * The attribute pairs of an untagged `* STATUS <mailbox> (MESSAGES 231 UIDNEXT 4429)`
+ * line, numeric values only. Exported for tests.
+ */
+export function parseStatusResponse(untaggedLines: readonly string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  const line = untaggedLines.find((l) => /^\* STATUS /i.test(l));
+  if (!line) return out;
+  const open = line.lastIndexOf('(');
+  const close = line.lastIndexOf(')');
+  if (open < 0 || close < open) return out;
+  const tokens = line.slice(open + 1, close).trim().split(/\s+/);
+  for (let i = 0; i + 1 < tokens.length; i += 2) {
+    const value = Number(tokens[i + 1]);
+    if (/^[A-Za-z]+$/.test(tokens[i]) && Number.isFinite(value)) out[tokens[i].toUpperCase()] = value;
+  }
+  return out;
+}
+
 /** Decode IMAP encoded-word in subject etc. (rudimentary; mailparser handles full decode). */
 function decodeImapString(s: string): string {
   // Return as-is; mailparser in the email parser handles full RFC 2047 decode.
@@ -786,14 +829,37 @@ const TIMEOUT = {
  */
 export async function openImapSession(config: ImapConfig): Promise<ImapSession> {
   // 1. Open TLS socket with timeout
+  //
+  // A relay-only host (mail-relay.ts) refuses sign-ins from this app's own
+  // address, so its TCP leg is a tunnel through the relay and TLS is negotiated
+  // over that. Everything after the socket exists is identical. A host the
+  // relay registry learned (relay-fallback.ts; the caller refreshes the list)
+  // is tunnelled too, but falls back to a direct dial when the relay cannot
+  // carry it, which is no worse than before it was learned.
+  const relayOnly = relayForMailHost(config.host);
+  const relay = relayOnly ?? (relayRouteForHost(config.host, 'imap') === 'learned' ? mailRelayConfigFromEnv() : null);
+  let tunnel: net.Socket | null = null;
+  if (relay) {
+    try {
+      tunnel = await openMailRelayTunnel(relay, config.host, config.port);
+    } catch (err) {
+      if (!relayOnly) {
+        console.warn('[imap] relay unavailable for a learned host, dialling directly:', err instanceof Error ? err.message : String(err));
+      } else throw new McpEmailsError(
+        'CONNECTION_TIMEOUT',
+        `Could not reach ${config.host} through the mail relay: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
   const socket = await Promise.race([
     new Promise<tls.TLSSocket>((resolve, reject) => {
       const s = tls.connect(
         {
           // The guard-approved address when there is one; the name otherwise.
           // Dialling the address rather than re-resolving the name is what stops
-          // a DNS answer changing between the check and the connect.
-          host: config.pinnedAddress || config.host,
+          // a DNS answer changing between the check and the connect. With a
+          // tunnel the socket is already open and these two are not used.
+          ...(tunnel ? { socket: tunnel } : { host: config.pinnedAddress || config.host }),
           port: config.port,
           // Implicit TLS (no STARTTLS); server must speak TLS from the first byte.
           rejectUnauthorized: true,
@@ -801,6 +867,8 @@ export async function openImapSession(config: ImapConfig): Promise<ImapSession> 
           // never the pinned address: checkServerIdentity prefers `servername`,
           // so pinning an IP does not weaken validation.
           servername: config.host,
+          // Empty except for docomo's exact hosts; see legacy-tls.ts.
+          ...legacyTlsOptions(config.host),
         },
         () => resolve(s)
       );
@@ -856,7 +924,7 @@ export async function openImapSession(config: ImapConfig): Promise<ImapSession> 
 
   // 4. Authenticate
   await closeOnError(async () => {
-    const authTag = nextTag();
+    let authTag = nextTag();
 
     if (config.authMethod === 'XOAUTH2') {
       if (!config.accessToken) {
@@ -917,7 +985,40 @@ export async function openImapSession(config: ImapConfig): Promise<ImapSession> 
           ? parseImapCapabilities([...capResult.untagged, capResult.text])
           : null;
       }
-      const mechanism = chooseImapPasswordMechanism(caps);
+      let mechanism = chooseImapPasswordMechanism(caps);
+
+      // AUTH PLAIN, unchanged on the wire. A PLAIN refused as a mechanism
+      // (T-Online) never reached the password check, so it falls through to
+      // LOGIN on the same connection; see shouldRetryPlainWithLogin.
+      if (mechanism === 'PLAIN') {
+        const payload = buildPlainAuthToken(username, password);
+        await socketWrite(socket, `${authTag} AUTHENTICATE PLAIN ${payload}\r\n`);
+
+        let authResult = await readTaggedResponse(reader, authTag, TIMEOUT.AUTHENTICATE);
+
+        // A tagged BAD rejects the command, not the credentials: the server does
+        // not implement RFC 4959 (SASL-IR) and will not accept the initial
+        // response inline. Yandex is the preset that behaves this way. Retry the
+        // RFC 3501 two-step form on the same connection; NO is a real credential
+        // rejection and falls straight through.
+        if (authResult.status === 'BAD') {
+          const retryTag = nextTag();
+          await socketWrite(socket, `${retryTag} AUTHENTICATE PLAIN\r\n`);
+          await readSaslContinuation(reader);
+          await socketWrite(socket, `${payload}\r\n`);
+          authResult = await readTaggedResponse(reader, retryTag, TIMEOUT.AUTHENTICATE);
+        }
+
+        if (authResult.status === 'OK') return;
+        if (!shouldRetryPlainWithLogin(caps, authResult.status, authResult.text)) {
+          socket.destroy();
+          throw new ImapAuthError(
+            `PLAIN authentication rejected: ${redactImapAuthText(authResult.text, [...secrets, payload])}`
+          );
+        }
+        mechanism = 'LOGIN';
+        authTag = nextTag();
+      }
 
       if (mechanism === 'LOGIN') {
         // RFC 3501 LOGIN. Quoted strings, or synchronizing literals for
@@ -968,31 +1069,6 @@ export async function openImapSession(config: ImapConfig): Promise<ImapSession> 
         return;
       }
 
-      // AUTH PLAIN, unchanged on the wire.
-      const payload = buildPlainAuthToken(username, password);
-      await socketWrite(socket, `${authTag} AUTHENTICATE PLAIN ${payload}\r\n`);
-
-      let authResult = await readTaggedResponse(reader, authTag, TIMEOUT.AUTHENTICATE);
-
-      // A tagged BAD rejects the command, not the credentials: the server does
-      // not implement RFC 4959 (SASL-IR) and will not accept the initial
-      // response inline. Yandex is the preset that behaves this way. Retry the
-      // RFC 3501 two-step form on the same connection; NO is a real credential
-      // rejection and falls straight through.
-      if (authResult.status === 'BAD') {
-        const retryTag = nextTag();
-        await socketWrite(socket, `${retryTag} AUTHENTICATE PLAIN\r\n`);
-        await readSaslContinuation(reader);
-        await socketWrite(socket, `${payload}\r\n`);
-        authResult = await readTaggedResponse(reader, retryTag, TIMEOUT.AUTHENTICATE);
-      }
-
-      if (authResult.status !== 'OK') {
-        socket.destroy();
-        throw new ImapAuthError(
-          `PLAIN authentication rejected: ${redactImapAuthText(authResult.text, [...secrets, payload])}`
-        );
-      }
     }
   });
 
@@ -1094,6 +1170,48 @@ export async function openImapSession(config: ImapConfig): Promise<ImapSession> 
       }
 
       return parseListResponse(result.untagged);
+    },
+
+    async append(mailbox: string, message: string, flags: string[] = []): Promise<void> {
+      // Flags are atoms like \Draft. Anything else could smuggle syntax into
+      // the command line, so it is refused rather than escaped.
+      for (const flag of flags) {
+        if (!/^\\?[A-Za-z]+$/.test(flag)) {
+          throw new McpEmailsError('IMAP_PROTOCOL_ERROR', 'Invalid APPEND flag');
+        }
+      }
+      const bytes = Buffer.from(message, 'utf8');
+      const appendTag = nextTag();
+      const flagList = flags.length > 0 ? ` (${flags.join(' ')})` : '';
+      await socketWrite(socket, `${appendTag} APPEND ${quoteMailbox(mailbox)}${flagList} {${bytes.length}}\r\n`);
+      const reply = await readContinuationOrTagged(reader, appendTag);
+      if (!('continuation' in reply)) {
+        throw new ImapNoError(`APPEND ${reply.status}: ${reply.text}`);
+      }
+      await socketWrite(socket, bytes);
+      await socketWrite(socket, '\r\n');
+      const result = await readTaggedResponse(reader, appendTag, TIMEOUT.COMMAND);
+      if (result.status === 'NO') {
+        throw new ImapNoError(`APPEND NO: ${result.text}`);
+      }
+      if (result.status === 'BAD') {
+        throw new ImapBadError(`APPEND BAD: ${result.text}`);
+      }
+    },
+
+    async status(mailbox: string, items: readonly string[]): Promise<Record<string, number>> {
+      const wanted = items.filter((item) => /^[A-Z]+$/.test(item));
+      if (wanted.length === 0) return {};
+      const statusTag = nextTag();
+      await socketWrite(socket, `${statusTag} STATUS ${quoteMailbox(mailbox)} (${wanted.join(' ')})\r\n`);
+      const result = await readTaggedResponse(reader, statusTag, TIMEOUT.COMMAND);
+      if (result.status === 'NO') {
+        throw new ImapNoError(`STATUS NO: ${result.text}`);
+      }
+      if (result.status === 'BAD') {
+        throw new ImapBadError(`STATUS BAD: ${result.text}`);
+      }
+      return parseStatusResponse(result.untagged);
     },
 
     async logout(): Promise<void> {

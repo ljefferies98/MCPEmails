@@ -6,6 +6,13 @@
 //     multiple accounts for the Gmail, Google Calendar and Google Contacts
 //     plugins on Plus, Pro, Business and Enterprise; 2026-09-17, multiple
 //     accounts extended to other plugins, all plans.
+// Custom connector setup steps (Claude: Customize > Connectors > + Add > Add
+// custom connector; ChatGPT: Plugins > Personal > Add > Add custom MCP server,
+// no developer mode) were re-checked on 2026-10-26 against
+// support.claude.com/en/articles/11175166 and help.openai.com/en/articles/12584461.
+// The ChatGPT plan list was re-read on 2026-11-11: OpenAI names Business and
+// Enterprise/Edu (full support) and Pro (read/fetch only); Go and Plus are not
+// mentioned.
 // Re-check both before editing the "What the built-in connectors do" section;
 // these products change monthly. Prices are deliberately not quoted: they are
 // on /pricing, and a repricing must not leave this post wrong.
@@ -19,7 +26,7 @@ const post = {
     'Several work and personal email accounts connected to Claude and ChatGPT through one MCP connector',
   authorId: 'asgeir',
   publishedAt: '2026-09-29T09:00:00.000Z',
-  updatedAt: '2026-09-29T09:00:00.000Z',
+  updatedAt: '2026-11-16T21:30:00.000Z',
   tags: ['Multiple inboxes', 'Claude', 'ChatGPT', 'MCP'],
   featured: false,
   content: `You want to ask one question and have it answered across every mailbox you run: your own address, info@, sales@, the invoices inbox, maybe a personal Gmail. This guide shows how to get several email accounts into Claude and ChatGPT at the same time, what the built-in connectors already cover, and where you need an MCP server instead.
@@ -33,17 +40,17 @@ Both assistants ship their own mail connectors, and they have moved quickly, so 
 - **ChatGPT.** Since late August 2026 its own Gmail, Google Calendar and Google Contacts plugins can hold more than one account on Plus, Pro, Business and Enterprise, so a personal and a work Gmail can sit in the same conversation. In September OpenAI extended multiple accounts to other plugins. If every mailbox you have is a Google account, ChatGPT's own plugin may be all you need.
 - **Claude.** Anthropic's help centre describes the Gmail connector as reaching "the Google account you've connected". One Google account per connection.
 
-What neither is built for is the mailbox a company actually runs on its own domain when that domain is not on Google or Microsoft: IONOS, Zoho Mail, Namecheap Private Email, STRATO, Migadu, a cPanel host or your own server. Those speak IMAP and SMTP, and reaching them takes something that speaks IMAP.
+What neither is built for is the mailbox a company actually runs on its own domain when that domain is not on Google or Microsoft: IONOS, Zoho Mail, Namecheap Private Email, STRATO, Migadu, a cPanel host or your own server. Those speak IMAP and SMTP, and reaching them takes something that speaks IMAP. [How to connect any email account to Claude or ChatGPT](/blog/connect-any-email-to-claude-and-chatgpt) lists every route, including the other hosted services and the self-hosted ones.
 
 ## One connector for every mailbox
 
-MCP Emails is a hosted MCP server. You connect each mailbox to it once, and your AI client reaches all of them through one URL:
+MCPEmails is a hosted MCP server. You connect each mailbox to it once, and your AI client reaches all of them through one URL:
 
 \`\`\`
 https://mcpemails.com/api/mcp
 \`\`\`
 
-- **Any mix of providers.** Gmail and Google Workspace (app password or Sign in with Google), Outlook and Microsoft 365 (Sign in with Microsoft), iCloud, Fastmail, Yahoo, Zoho, Yandex, and any mailbox that speaks IMAP and SMTP. There is a page per host under [connect](/connect), including [IONOS](/connect/ionos), [Zoho Mail](/connect/zoho), [Namecheap](/connect/namecheap), [STRATO](/connect/strato), [Migadu](/connect/migadu), [Google Workspace](/connect/google-workspace) and [Microsoft 365](/connect/office365).
+- **Any mix of providers.** Gmail and Google Workspace (Google app password), Outlook and Microsoft 365 (Sign in with Microsoft), iCloud, Fastmail, Yahoo, Zoho, Yandex, and any mailbox that speaks IMAP and SMTP. There is a page per host under [connect](/connect), including [IONOS](/connect/ionos), [Zoho Mail](/connect/zoho), [Namecheap](/connect/namecheap), [STRATO](/connect/strato), [Migadu](/connect/migadu), [Google Workspace](/connect/google-workspace) and [Microsoft 365](/connect/office365).
 - **The same mailboxes in both assistants.** It is a standard MCP server, so the one connection works in Claude and in ChatGPT, and in Cursor, VS Code and other MCP clients too. Add a mailbox once and every client sees it.
 - **The agent knows which mailbox is which.** It calls \`inbox_list\` and gets every connected address with its display name. Every other tool names the mailbox it acts on, so you just say "in sales@" in plain language.
 - **Replies leave from the right address.** Each mailbox sends through its own provider or SMTP server, with its own sender name and signature. A reply to a thread in support@ goes out from support@.
@@ -52,10 +59,10 @@ Mail is fetched live for each request and not stored. The one exception is a mes
 
 ## Connect the mailboxes
 
-In the MCP Emails dashboard, open **Inboxes**, then **Connect Inbox**, once per mailbox:
+In the MCPEmails dashboard, open **Inboxes**, then **Connect Inbox**, once per mailbox:
 
 - **Company mailbox on its own domain.** Choose **IMAP** and type the address. Common hosts are recognised from the address, and a Google Workspace domain is recognised from its mail records, so the settings fill themselves in. Use the password or app password your host requires.
-- **Gmail or Google Workspace.** An app password, or Sign in with Google. On Workspace, your administrator decides whether app passwords and IMAP are allowed.
+- **Gmail or Google Workspace.** A Google app password over IMAP. Google offers one only after 2-Step Verification is on, and on Workspace your administrator can switch app passwords and IMAP off.
 - **Outlook or Microsoft 365.** Sign in with Microsoft. A work or school account may need its IT admin to approve the app once for the whole organisation.
 
 Give each mailbox a clear display name, such as "Acme Sales" rather than "work2". It is what the agent reads to tell them apart, and it is the name recipients see.
@@ -64,19 +71,25 @@ Give each mailbox a clear display name, such as "Acme Sales" rather than "work2"
 
 In claude.ai or Claude Desktop:
 
-1. Open **Settings**, then **Connectors**.
-2. Choose **Add custom connector** and paste \`https://mcpemails.com/api/mcp\`.
-3. Select **Connect**, sign in to MCP Emails, and approve.
+1. Open **Customize → Connectors**.
+2. Click **+ Add**, then **Add custom connector**. Name it MCPEmails, paste \`https://mcpemails.com/api/mcp\` and click **Continue**.
+3. Keep the detected sign-in settings, click **Add**, sign in to MCPEmails, and approve.
+4. In a chat, click **+** at the lower left, choose **Connectors** and switch MCPEmails on.
+
+Claude's Free plan allows one custom connector, and Pro and Max have no limit. On Team and Enterprise, an Owner adds it under **Organization settings → Connectors** and members click **Connect** under **Customize → Connectors**.
 
 Every mailbox you connected is now available. The [Claude guide](/blog/connect-claude-to-email) has the details.
 
 ## Add it to ChatGPT
 
-Custom connectors need ChatGPT Plus, Pro, Business, Enterprise or Edu on the web, with developer mode switched on. On Business and Enterprise an admin may need to allow it first.
+**Quickest route: the plugin directory.** Since 16 November 2026, MCPEmails is in the ChatGPT plugin directory as **Any Mailbox**. In ChatGPT, open **Plugins**, search for Any Mailbox, click **Install plugin**, then **Connect**, and sign in to MCPEmails. Whether a plugin can be installed depends on your ChatGPT plan, workspace, role and region. If you cannot install it, add a custom MCP server with the steps below.
 
-1. Turn on **developer mode** in ChatGPT settings, under the apps and connectors advanced settings.
-2. Create a connector, paste \`https://mcpemails.com/api/mcp\`, choose **OAuth**, and authorize with MCP Emails.
-3. In each new chat, click **+**, choose **Developer mode** and select the MCP Emails app.
+A paid ChatGPT plan can add a custom MCP server on chatgpt.com in a browser; the mobile app cannot add one. OpenAI's help page lists Business and Enterprise/Edu, where an admin or owner adds it for the workspace, and read and fetch tools only on Pro; Go and Plus are not mentioned.
+
+1. Open **Plugins**, then **Personal**, click **Add** at the top right and choose **Add custom MCP server**.
+2. Name it MCPEmails, paste \`https://mcpemails.com/api/mcp\` under **Connection**, choose **OAuth**, tick **I understand and want to continue**, and click **Create as a plugin**.
+3. Sign in with MCPEmails and approve.
+4. In a chat, type **@** and pick MCPEmails. The pick applies to that message, so @mention it again when a follow-up needs your email.
 
 The [ChatGPT guide](/blog/connect-chatgpt-to-email) covers the menus and the common errors.
 
@@ -97,32 +110,32 @@ Turn on **Review before sending** for any mailbox and every send, reply, forward
 ## How many mailboxes each plan connects
 
 - **Free:** one mailbox.
-- **Personal:** three mailboxes.
-- **Pro:** every mailbox you run, with no limit, on one login.
-- **Team:** for when a second person needs a login of their own.
+- **Personal:** a few mailboxes, for one person.
+- **Pro:** more mailboxes, still on one login.
+- **Business:** a block of included mailboxes with a per-mailbox price above it, and for when a second person needs a login of their own.
 
-A company with info@, sales@ and invoices@ plus your own address is four mailboxes, which is Pro. Current prices are on the [pricing page](/pricing), and [MCP Emails for business](/for/business) shows how one person runs every company mailbox from one agent.
+A company with info@, sales@ and invoices@ plus your own address is four mailboxes, which puts you on Pro. Current mailbox counts and prices are on the [pricing page](/pricing), and [MCPEmails for business](/for/business) shows how one person runs every company mailbox from one agent.
 
 ## FAQ
 
 **Can Claude use more than one email account at once?**
-Yes, through an MCP server. Connect each mailbox to MCP Emails, add one custom connector to Claude, and Claude sees all of them and names the mailbox on every call.
+Yes, through an MCP server. Connect each mailbox to MCPEmails, add one custom connector to Claude, and Claude sees all of them and names the mailbox on every call.
 
 **Can ChatGPT use more than one email account?**
-Its own Gmail plugin can now hold several Google accounts. For mailboxes that are not on Google, such as a company address at IONOS, Zoho or a cPanel host, add MCP Emails as a custom connector and every connected mailbox is available.
+Its own Gmail plugin can now hold several Google accounts. For mailboxes that are not on Google, such as a company address at IONOS, Zoho or a cPanel host, add MCPEmails as a custom connector and every connected mailbox is available.
 
 **Do I need a separate connector per mailbox?**
-No. One connector URL covers every mailbox in your MCP Emails workspace, and the same URL works in Claude, ChatGPT and other MCP clients.
+No. One connector URL covers every mailbox in your MCPEmails workspace, and the same URL works in Claude, ChatGPT and other MCP clients.
 
 **Will a reply go out from the right address?**
-Yes. Each mailbox sends through its own provider or mail server with its own display name and signature. Sending from an address that is not the mailbox's own works only for a verified Gmail Send As address on a mailbox connected with Sign in with Google, and is refused elsewhere.
+Yes. Each mailbox sends through its own provider or mail server with its own display name and signature. To send from another address on an IMAP mailbox, add it in that mailbox's settings in the dashboard and verify it with the code emailed to that address. Outlook sends from the connected address, and a From address that is not verified is refused.
 
 **Is the mail from all those accounts stored?**
 No. Message content is fetched live from your provider on each request and discarded. The encrypted credential for each mailbox is what is kept. See [security](/security).
 
 ## Next step
 
-[Start free](/signup) with your busiest mailbox, add the MCP Emails connector to Claude or ChatGPT, and ask what needs a reply today. Add the other mailboxes when you want one answer instead of several.`,
+[Start free](/signup) with your busiest mailbox, add the MCPEmails connector to Claude or ChatGPT, and ask what needs a reply today. Add the other mailboxes when you want one answer instead of several.`,
 };
 
 export default post;

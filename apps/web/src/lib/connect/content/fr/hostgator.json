@@ -2,7 +2,9 @@
   "_sources": [
     "https://www.hostgator.com/help/article/pop3-or-imap-with-ssl",
     "https://www.hostgator.com/help/article/email-connection-settings",
-    "https://www.hostgator.com/help/article/professional-email-product-overview"
+    "https://www.hostgator.com/help/article/professional-email-product-overview",
+    "https://suporte.hostgator.com.br/hc/pt-br/articles/30811089087379-Como-usar-seu-e-mail-em-plataformas-externas-Gmail-Outlook-e-outros",
+    "https://suporte.hostgator.com.br/hc/pt-br/articles/30820346865811-Como-saber-o-nome-do-seu-servidor-na-HostGator"
   ],
   "auth": {
     "method": "mail-password",
@@ -20,7 +22,7 @@
     "titleLine1": "Connectez votre messagerie HostGator à Claude,",
     "titleLine2": "Cursor, ChatGPT, tout client MCP",
     "lead": "Offrez à votre agent IA une vraie boîte HostGator. Lisez, recherchez, envoyez, répondez, planifiez et organisez le courrier en IMAP, avec le nom d'hôte de serveur que le certificat de HostGator couvre réellement.",
-    "answer": "Claude ne peut pas accéder seul à une boîte HostGator. mcpemails est un serveur MCP hébergé qui s'y connecte en IMAP standard sur le port 993, pour que Claude, Cursor ou tout client MCP puisse lire, rechercher, envoyer et organiser ce courrier. HostGator n'exploite pas un serveur mail partagé unique : pour une connexion sécurisée, vous pointez vers le nom d'hôte de votre propre serveur, gatorNNNN.hostgator.com sur les offres mutualisées et cloud, et servername.websitewelcome.com sur les offres revendeur, car ce sont les noms que couvre leur certificat wildcard. L'authentification se fait avec le mot de passe défini sur la boîte dans cPanel, et une boîte est gratuite.",
+    "answer": "Claude ne peut pas accéder seul à une boîte HostGator. MCPEmails est un serveur MCP hébergé qui s'y connecte en IMAP standard sur le port 993, pour que Claude, Cursor ou tout client MCP puisse lire, rechercher, envoyer et organiser ce courrier. HostGator n'exploite pas un serveur mail partagé unique : pour une connexion sécurisée, vous pointez vers le nom d'hôte de votre propre serveur, gatorNNNN.hostgator.com sur les offres mutualisées et cloud, et servername.websitewelcome.com sur les offres revendeur, car ce sont les noms que couvre leur certificat wildcard. L'authentification se fait avec le mot de passe défini sur la boîte dans cPanel, et une boîte est gratuite.",
     "meta0": "1 boîte gratuite, pour toujours",
     "meta1": "Mot de passe de la boîte depuis cPanel",
     "meta2": "E-mails récupérés en direct, jamais stockés"
@@ -31,7 +33,7 @@
   },
   "setup": [
     {
-      "h": "Créez un compte mcpemails gratuit",
+      "h": "Créez un compte MCPEmails gratuit",
       "p": "Inscrivez-vous sur mcpemails.com. L'offre gratuite connecte une boîte, sans carte bancaire."
     },
     {
@@ -40,7 +42,7 @@
     },
     {
       "h": "Utilisez le mot de passe de la boîte, pas celui de cPanel",
-      "p": "IMAP s'authentifie avec le mot de passe défini sur l'adresse elle-même. Dans cPanel, ouvrez <b>Email Accounts</b> et cliquez sur <b>Manage</b> à côté de l'adresse pour en définir un. Collez-le ensuite dans mcpemails avec l'adresse e-mail complète comme identifiant et le nom d'hôte du serveur que vous venez de copier."
+      "p": "IMAP s'authentifie avec le mot de passe défini sur l'adresse elle-même. Dans cPanel, ouvrez <b>Email Accounts</b> et cliquez sur <b>Manage</b> à côté de l'adresse pour en définir un. Collez-le ensuite dans MCPEmails avec l'adresse e-mail complète comme identifiant et le nom d'hôte du serveur que vous venez de copier."
     },
     {
       "h": "Collez l'URL MCP dans votre IA",
@@ -59,6 +61,10 @@
     {
       "h": "Passer outre l'avertissement de certificat est la mauvaise solution, et masque un vrai problème",
       "p": "Comme cette discordance est très courante chez HostGator, le contournement habituel consiste à accepter le certificat ou à ajouter une exception. Un client de bureau vous le permet. Une connexion IMAP automatisée depuis un serveur, ce qu'est une intégration MCP, ne le permet généralement pas, et ne devrait pas : une fois que vous ignorez par habitude la discordance de nom, vous n'avez plus aucun moyen d'en remarquer une vraie. Pointez vers le nom d'hôte du serveur et le certificat se valide correctement, sans aucune exception."
+    },
+    {
+      "h": "HostGator Brasil exploite ses propres serveurs, nommés brNNN.hostgator.com.br",
+      "p": "Une offre achetée chez HostGator Brasil n'est pas du tout sur les serveurs gator. Son site d'assistance documente les mêmes ports cPanel, 993 pour IMAP et 465 pour SMTP avec SSL, mais le nom de serveur recommandé est celui du serveur de votre propre offre d'hébergement, de la forme <code>br100.hostgator.com.br</code>, avec <code>mail.seudominio.com.br</code> comme alternative non chiffrée. Le nom apparaît dans le Portal do Cliente sous <b>Hospedagens e Servidores</b>, <b>Gerenciar</b>, dans le champ <b>Nome do Servidor</b>, et dans l'e-mail de bienvenue sous <b>Informações Técnicas</b>. Le produit de boîte payante de HostGator Brasil, vendu sous le nom E-mail Profissional, tourne sur Titan avec <code>imap.titan.email</code> et <code>smtp.titan.email</code>, et son assistance indique que Titan doit être activé pour les applications externes avant qu'un client puisse se connecter ; connectez celui-là comme Titan, pas comme cPanel."
     }
   ],
   "limits": [
@@ -68,7 +74,7 @@
   "faq": [
     {
       "q": "Claude fonctionne-t-il avec la messagerie HostGator ?",
-      "a": "Pas directement. Claude n'a pas de connecteur HostGator. Connecter un serveur MCP comme mcpemails à la boîte en IMAP donne à Claude un accès en lecture, recherche, envoi, réponse, planification et organisation, avec les mêmes identifiants que n'importe quel client mail de bureau."
+      "a": "Pas directement. Claude n'a pas de connecteur HostGator. Connecter un serveur MCP comme MCPEmails à la boîte en IMAP donne à Claude un accès en lecture, recherche, envoi, réponse, planification et organisation, avec les mêmes identifiants que n'importe quel client mail de bureau."
     },
     {
       "q": "Quels sont les réglages IMAP et SMTP de HostGator ?",

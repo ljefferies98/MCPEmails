@@ -21,7 +21,7 @@ Claude trenger derfor aldri et IMAP-bibliotek, en SMTP-konfigurasjon eller et pa
 
 ## Dette trenger du før oppsettet
 
-Finn disse verdiene på hjelpesiden til e-postleverandøren eller hos administratoren:
+Finn disse verdiene på hjelpesiden til e-postleverandøren eller hos administratoren. Du kan også se [verifiserte IMAP- og SMTP-innstillinger for hver leverandør](/connect):
 
 - **E-postadresse:** for eksempel \`you@example.com\`. Dette er adressen som vises på den tilkoblede innboksen.
 - **Brukernavn for innlogging:** vanligvis hele e-postadressen. Enkelte verter for egendefinerte domener oppgir et annet IMAP-/SMTP-brukernavn.
@@ -33,7 +33,7 @@ Ikke gjett servernavnene ut fra domenet dersom leverandøren publiserer innstill
 
 Bruk et **app-passord** når leverandøren støtter det. Det er atskilt fra hovedpassordet til kontoen og kan tilbakekalles uten å endre passordet du logger inn med. Leverandører krever ofte tofaktorautentisering før du kan opprette et. Noen krever også at du først aktiverer IMAP-tilgang i e-postinnstillingene.
 
-MCPEmails har forhåndsinnstillinger for iCloud, Yahoo, Zoho og Yandex, samt en egen app-passordflyt for Fastmail. Disse valgene fyller inn kjente verter og porter for deg. Velg **Generic IMAP** for en annen leverandør eller din egen e-postserver, og skriv inn verdiene selv.
+MCPEmails har forhåndsinnstillinger for [iCloud](/connect/icloud), [Yahoo](/connect/yahoo), [Zoho](/connect/zoho) og [Yandex](/connect/yandex), samt en egen app-passordflyt for [Fastmail](/connect/fastmail). Disse valgene fyller inn kjente verter og porter for deg. Velg **Generic IMAP** for en annen leverandør eller din egen e-postserver, og skriv inn verdiene selv. Se [oppsettsiden for generisk IMAP](/connect/imap).
 
 ## Steg 1: Koble til IMAP-/SMTP-postkassen
 
@@ -80,7 +80,7 @@ Den siste funksjonen krever omtanke. Permanent IMAP-sletting omgår papirkurven 
 
 En IMAP-kobling har bred støtte, men gjør ikke alle leverandører identiske.
 
-- **Ingen push for innkommende e-post:** MCPEmails er kun basert på forespørsel og svar. Tjenesten sender ikke webhooks eller utløser Claude når en melding kommer inn. En automatisert arbeidsflyt må sjekke etter nye meldinger etter en tidsplan, for eksempel ved å liste ulest e-post.
+- **Ingen push for innkommende e-post inn i Claude:** MCP-verktøyene er basert på forespørsel og svar, så ingenting utløser Claude når en melding kommer inn. En chatbasert arbeidsflyt sjekker etter nye meldinger etter en tidsplan, for eksempel ved å liste ulest e-post. Din egen kode kan i stedet vekkes av en webhook for ny post, som Pro- og Business-arbeidsområder legger til under API-nøkler.
 - **Søk varierer etter transport:** Strukturerte filtre for avsender, emne, tekst og dato fungerer på tvers av leverandører, men generisk IMAP støtter ikke søkefilteret \`has_attachment\`. Leverandørspesifikk søkesyntaks kan ikke flyttes mellom tjenester.
 - **Mapper er ikke Gmail-etiketter:** IMAP flytter en melding mellom mapper, mens Gmail kan knytte flere etiketter til én melding. Den praktiske forskjellen forklares i [Gmail-etiketter kontra IMAP-mapper](/blog/gmail-labels-vs-imap-folders-ai-agents).
 - **SMTP kreves for sending:** En fungerende IMAP-innlogging beviser at Claude når innkommende e-post, ikke at SMTP-verten, porten eller sendetillatelsen er riktig. Test én ufarlig utgående melding før du stoler på en svarflyt.

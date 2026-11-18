@@ -19,6 +19,21 @@ function requestErrorMessage(error) {
   return error instanceof Error && error.message ? error.message : 'Could not load approvals.';
 }
 
+/** The approval windows a workspace can pick. Mirrors src/lib/approvals/window.ts. */
+const WINDOW_OPTIONS = [
+  { hours: 24, label: '1 day' },
+  { hours: 72, label: '3 days' },
+  { hours: 168, label: '7 days' },
+  { hours: 336, label: '14 days' },
+];
+
+function windowLabel(hours) {
+  return WINDOW_OPTIONS.find((option) => option.hours === hours)?.label ?? `${hours} hours`;
+}
+
+/** A decision the server refused because the request changed after it was shown. */
+class ChangedError extends Error {}
+
 /**
  * Pending email send decisions. The page intentionally only shows the small
  * review summary supplied by the API, never an email body or attachment.
@@ -32,7 +47,10 @@ export function ApprovalsPanel({ userRole }) {
   const [error, setError] = useState('');
   const [decisionItem, setDecisionItem] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  // The role rule; each row also carries `can_decide` from the API, which adds
+  // the owner of a private inbox deciding their own sends (lib/approvals/access.ts).
   const canDecide = userRole === 'owner' || userRole === 'admin';
+  const rowCanDecide = (item) => (typeof item.can_decide === 'boolean' ? item.can_decide : canDecide);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,11 +58,14 @@ export function ApprovalsPanel({ userRole }) {
       const response = await fetch('/api/approvals', { cache: 'no-store' });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'Could not load approvals.');
-      setItems(Array.isArray(payload.approvals) ? payload.approvals : []);
+      const pending = Array.isArray(payload.approvals) ? payload.approvals : [];
+      setItems(pending);
       setDecided(Array.isArray(payload.decided) ? payload.decided : []);
       setError('');
+      return pending;
     } catch (loadError) {
       setError(requestErrorMessage(loadError));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -55,16 +76,23 @@ export function ApprovalsPanel({ userRole }) {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  const decide = async () => {
+  const decide = async (details) => {
     if (!decisionItem || submitting) return;
     setSubmitting(true);
     try {
       const response = await fetch('/api/approvals', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: decisionItem.item.id, decision: decisionItem.decision }),
+        // The revision this dialog shows. An approve of any other version is
+        // refused as `changed` (src/lib/approvals/decide.ts).
+        body: JSON.stringify({
+          id: decisionItem.item.id,
+          decision: decisionItem.decision,
+          revision: details?.revision ?? null,
+        }),
       });
       const payload = await response.json().catch(() => ({}));
+      if (!response.ok && payload.code === 'changed') throw new ChangedError(payload.error);
       if (!response.ok) throw new Error(payload.error || 'Could not record this decision.');
       setItems(current => current.filter(item => item.id !== decisionItem.item.id));
       // Refresh so the row reappears under "Recently decided" with its
@@ -72,12 +100,32 @@ export function ApprovalsPanel({ userRole }) {
       void load();
       toast({
         message: decisionItem.decision === 'approve'
-          ? 'Email approved and queued for sending.'
+          ? t('approvals.panel.approvedToast')
           : 'Email request rejected.',
         variant: 'success',
       });
       setDecisionItem(null);
     } catch (decisionError) {
+      if (decisionError instanceof ChangedError) {
+        // Not a failure to retry blindly: the request now says something else.
+        // Reload it and keep the dialog open on the CURRENT version, so the
+        // person confirms what will actually be sent.
+        const fresh = await load();
+        const current = fresh?.find((item) => item.id === decisionItem.item.id) ?? null;
+        if (current) {
+          // A new `nonce` remounts the dialog, which reloads its details.
+          setDecisionItem({
+            item: current,
+            decision: decisionItem.decision,
+            changed: true,
+            nonce: (decisionItem.nonce ?? 0) + 1,
+          });
+        } else {
+          setDecisionItem(null);
+          toast({ message: t('approvals.panel.changedGone'), variant: 'error' });
+        }
+        return;
+      }
       const message = requestErrorMessage(decisionError);
       toast({ message, variant: 'error' });
       setError(message);
@@ -95,11 +143,13 @@ export function ApprovalsPanel({ userRole }) {
         </div>
       </div>
 
-      {!canDecide && !loading && !error ? (
+      {!canDecide && !items.some(rowCanDecide) && !loading && !error ? (
         <div className="alert" role="status" style={{ marginBottom: 16 }}>
           You can review pending sends, but only a workspace owner or admin can approve or reject them.
         </div>
       ) : null}
+
+      <ApprovalWindowSetting />
 
       {error ? (
         <div className="alert alert-error" role="alert" style={{ marginBottom: 16 }}>
@@ -134,15 +184,16 @@ export function ApprovalsPanel({ userRole }) {
           </div>
         ) : (
           <table className="data-table">
-            <thead><tr><th>Inbox</th><th>Recipients</th><th>Subject</th><th>Requested</th><th aria-label="Decision" /></tr></thead>
+            <thead><tr><th>Inbox</th><th>Recipients</th><th>Subject</th><th>Requested</th><th>Expires</th><th aria-label="Decision" /></tr></thead>
             <tbody>{items.map((item) => (
               <tr key={item.id}>
                 <td>{approvalLabel(item)}</td>
-                <td>{recipientLabel(item)}</td>
-                <td>{item.summary?.subject || '(no subject)'}</td>
+                <td>{item.redacted ? <span className="sub">{t('approvals.panel.privateHidden')}</span> : recipientLabel(item)}</td>
+                <td>{item.redacted ? <span className="sub">{t('approvals.panel.privateHidden')}</span> : item.summary?.subject || '(no subject)'}</td>
                 <td>{item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown time'}</td>
+                <td>{item.expires_at ? new Date(item.expires_at).toLocaleString() : '—'}</td>
                 <td className="right">
-                  {canDecide ? (
+                  {rowCanDecide(item) ? (
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                       <Btn size="sm" variant="secondary" onClick={() => setDecisionItem({ item, decision: 'reject' })}>Reject</Btn>
                       <Btn size="sm" variant="primary" onClick={() => setDecisionItem({ item, decision: 'approve' })}>Review & approve</Btn>
@@ -157,7 +208,7 @@ export function ApprovalsPanel({ userRole }) {
 
       {!loading && decided.length ? <DecidedTable rows={decided} t={t} /> : null}
 
-      {decisionItem ? <DecisionDialog item={decisionItem.item} decision={decisionItem.decision} submitting={submitting} onCancel={() => !submitting && setDecisionItem(null)} onConfirm={decide} /> : null}
+      {decisionItem ? <DecisionDialog key={`${decisionItem.item.id}:${decisionItem.nonce ?? 0}`} item={decisionItem.item} decision={decisionItem.decision} changed={decisionItem.changed === true} submitting={submitting} onCancel={() => !submitting && setDecisionItem(null)} onConfirm={decide} t={t} /> : null}
     </div>
   );
 }
@@ -202,8 +253,10 @@ function DecidedTable({ rows, t }) {
               return (
                 <tr key={row.id}>
                   <td>{approvalLabel(row)}</td>
-                  <td>{row.summary?.subject || '(no subject)'}</td>
-                  <td>{statusKey[row.status] ? t(statusKey[row.status]) : row.status}</td>
+                  <td>{row.redacted ? <span className="sub">{t('approvals.panel.privateHidden')}</span> : row.summary?.subject || '(no subject)'}</td>
+                  <td title={row.status === 'expired' ? 'Not decided within the approval window. Nothing was sent.' : undefined}>
+                    {statusKey[row.status] ? t(statusKey[row.status]) : row.status}
+                  </td>
                   <td>
                     {viaKey && t.has(viaKey) ? (
                       <span className="approvals-via">
@@ -221,6 +274,84 @@ function DecidedTable({ rows, t }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/**
+ * How long a held send stays decidable in this workspace
+ * (GET/PUT /api/approvals/settings). Owners and admins change it; everyone
+ * else sees it. A new window applies to sends held after the change.
+ */
+function ApprovalWindowSetting() {
+  const { toast } = useToast();
+  const [state, setState] = useState({ loading: true, windowHours: 24, canEdit: false, failed: false });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/approvals/settings', { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || 'Could not load the approval window.');
+        if (!cancelled) setState({ loading: false, windowHours: payload.windowHours, canEdit: payload.canEdit === true, failed: false });
+      })
+      .catch(() => { if (!cancelled) setState((current) => ({ ...current, loading: false, failed: true })); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const change = async (event) => {
+    const windowHours = Number(event.target.value);
+    const previous = state.windowHours;
+    setState((current) => ({ ...current, windowHours }));
+    setSaving(true);
+    try {
+      const response = await fetch('/api/approvals/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ windowHours }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Could not save the approval window.');
+      setState((current) => ({ ...current, windowHours: payload.windowHours }));
+      toast({ message: `Held sends now wait ${windowLabel(payload.windowHours)} for a decision.`, variant: 'success' });
+    } catch (saveError) {
+      setState((current) => ({ ...current, windowHours: previous }));
+      toast({ message: requestErrorMessage(saveError), variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (state.loading || state.failed) return null;
+  return (
+    <div className="card approvals-window" style={{ padding: 16, marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ minWidth: 0, flex: '1 1 280px' }}>
+        <label htmlFor="approval-window" style={{ fontWeight: 600, display: 'block' }}>Approval window</label>
+        <div className="sub" style={{ marginTop: 4 }}>
+          How long a held send waits for a decision. After that it expires and nothing is sent.
+          A change applies to sends held from now on.
+        </div>
+      </div>
+      {state.canEdit ? (
+        <select
+          id="approval-window"
+          className="input"
+          style={{ width: 'auto', minWidth: 140 }}
+          value={state.windowHours}
+          onChange={change}
+          disabled={saving}
+        >
+          {WINDOW_OPTIONS.map((option) => (
+            <option key={option.hours} value={option.hours}>{option.label}</option>
+          ))}
+        </select>
+      ) : (
+        <div id="approval-window" style={{ fontWeight: 600 }}>
+          {windowLabel(state.windowHours)}
+          <div className="sub" style={{ fontWeight: 400 }}>Only an owner or admin can change this.</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -248,8 +379,45 @@ function ApprovalListSkeleton() {
   );
 }
 
-function DecisionDialog({ item, decision, submitting, onCancel, onConfirm }) {
+/**
+ * The decision dialog. On open it loads this one approval's details
+ * (`GET /api/approvals/[id]`): the current recipients and subject, the Bcc
+ * addresses, the `revision` the decision carries, and whether it can be
+ * approved at all. The queue itself decrypts nothing. Approve waits for those
+ * details; Reject never does, since rejecting is safe whatever the request
+ * says.
+ */
+function DecisionDialog({ item, decision, changed, submitting, onCancel, onConfirm, t }) {
   const approving = decision === 'approve';
+  const [details, setDetails] = useState(null);
+  const [detailsFailed, setDetailsFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/approvals/${item.id}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!live) return;
+        if (!response.ok || !payload) setDetailsFailed(true);
+        else setDetails(payload);
+      })
+      .catch(() => { if (live) setDetailsFailed(true); });
+    return () => { live = false; };
+  }, [item.id]);
+
+  const bcc = Array.isArray(details?.bcc) ? details.bcc.filter(Boolean) : [];
+  const bccCount = Math.max(
+    typeof details?.bcc_count === 'number' ? details.bcc_count
+      : typeof item.summary?.bcc_count === 'number' ? item.summary.bcc_count : 0,
+    bcc.length,
+  );
+  const recipients = details
+    ? (details.to?.length ? details.to.join(', ') : 'No recipient supplied')
+    : recipientLabel(item);
+  const subject = details ? details.subject : item.summary?.subject;
+  const notApprovable = details?.approvable === false;
+  const confirmDisabled = submitting || (approving && (!details || notApprovable));
+
   return (
     <div className="scrim" onClick={onCancel}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="approval-decision-title" onClick={(event) => event.stopPropagation()} style={{ width: 460 }}>
@@ -257,21 +425,49 @@ function DecisionDialog({ item, decision, submitting, onCancel, onConfirm }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
             <div>
               <h2 id="approval-decision-title" style={{ margin: 0 }}>{approving ? 'Approve email send?' : 'Reject email send?'}</h2>
-              <div className="sub" style={{ marginTop: 4 }}>{approving ? 'This will queue the prepared email to be sent.' : 'This prepared email will not be sent.'}</div>
+              <div className="sub" style={{ marginTop: 4 }}>{approving ? t('approvals.panel.approveSub') : 'This prepared email will not be sent.'}</div>
             </div>
             <button type="button" onClick={onCancel} disabled={submitting} aria-label="Close" style={{ background: 'transparent', border: 0, color: 'var(--fg-3)', cursor: submitting ? 'not-allowed' : 'pointer', padding: 4 }}><Icon name="x" size={16} /></button>
           </div>
         </div>
         <div className="modal-body">
+          {changed ? (
+            <div className="alert" role="alert" style={{ marginBottom: 12 }}>
+              {t('approvals.panel.changedNotice')}
+            </div>
+          ) : null}
+          {detailsFailed ? (
+            <div className="alert alert-error" role="alert" style={{ marginBottom: 12 }}>
+              {t('approvals.panel.detailsFailed')}
+            </div>
+          ) : null}
+          {approving && notApprovable ? (
+            <div className="alert" role="status" style={{ marginBottom: 12 }}>
+              {t('approvals.review.bodyStoredWithProvider')}
+            </div>
+          ) : null}
           <dl style={{ margin: 0, display: 'grid', gap: 10 }}>
             <div><dt className="sub">Inbox</dt><dd style={{ margin: '2px 0 0' }}>{approvalLabel(item)}</dd></div>
-            <div><dt className="sub">Recipients</dt><dd style={{ margin: '2px 0 0', overflowWrap: 'anywhere' }}>{recipientLabel(item)}</dd></div>
-            <div><dt className="sub">Subject</dt><dd style={{ margin: '2px 0 0' }}>{item.summary?.subject || '(no subject)'}</dd></div>
+            <div><dt className="sub">Recipients</dt><dd style={{ margin: '2px 0 0', overflowWrap: 'anywhere' }}>{recipients}</dd></div>
+            {bccCount > 0 ? (
+              <div>
+                <dt className="sub">{t('approvals.review.bcc')}</dt>
+                <dd style={{ margin: '2px 0 0', overflowWrap: 'anywhere' }}>
+                  {bcc.length ? bcc.join(', ') : t('approvals.review.bccCount', { count: bccCount })}
+                </dd>
+              </div>
+            ) : null}
+            <div><dt className="sub">Subject</dt><dd style={{ margin: '2px 0 0' }}>{subject || '(no subject)'}</dd></div>
           </dl>
+          <p className="sub" style={{ margin: '12px 0 0' }}>
+            <Link href={`/approvals/${item.id}`}>{t('approvals.panel.openReview')}</Link>
+          </p>
         </div>
         <div className="modal-foot">
           <Btn variant="secondary" onClick={onCancel} disabled={submitting}>Cancel</Btn>
-          <Btn variant={approving ? 'primary' : 'danger'} onClick={onConfirm} disabled={submitting}>{submitting ? 'Saving…' : approving ? 'Approve & queue' : 'Reject request'}</Btn>
+          <Btn variant={approving ? 'primary' : 'danger'} onClick={() => onConfirm(details)} disabled={confirmDisabled}>
+            {submitting ? 'Saving…' : approving && !details && !detailsFailed ? t('approvals.panel.loadingDetails') : approving ? t('approvals.panel.approveAndSend') : 'Reject request'}
+          </Btn>
         </div>
       </div>
     </div>

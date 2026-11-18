@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
+import NextLink from 'next/link';
 import { Link } from '@/i18n/navigation';
 import { Nav, Footer } from './Sections';
 
@@ -14,16 +15,20 @@ function fmtDate(iso, locale) {
   });
 }
 
-function PostCard({ post, t, locale }) {
+function PostCard({ post, t, locale, tagLabels }) {
+  // A post with no translation in this locale lives at its English URL only
+  // (the localized one 308s there), so link straight to it. next-intl's Link
+  // would add the current locale; its `locale` prop would emit /en/..., a 307.
+  const CardLink = post.canonicalLocale === locale ? Link : NextLink;
   return (
-    <Link href={`/blog/${post.slug}`} className="blog-card">
+    <CardLink href={`/blog/${post.slug}`} className="blog-card">
       <div className="blog-card-media">
         <img src={post.cover} alt={post.coverAlt} loading="lazy" decoding="async" />
       </div>
       <div className="blog-card-body">
         <div className="blog-card-tags">
           {post.tags.slice(0, 2).map((tag) => (
-            <span className="blog-tag" key={tag}>{tag}</span>
+            <span className="blog-tag" key={tag}>{tagLabels?.[tag] ?? tag}</span>
           ))}
         </div>
         <h2 className="blog-card-title">{post.title}</h2>
@@ -43,11 +48,11 @@ function PostCard({ post, t, locale }) {
           <span>{t('index.minRead', { minutes: post.readingMinutes })}</span>
         </div>
       </div>
-    </Link>
+    </CardLink>
   );
 }
 
-export default function BlogIndexClient({ posts }) {
+export default function BlogIndexClient({ posts, tagLabels = {} }) {
   const t = useTranslations('blog');
   const locale = useLocale();
   // Distinct tags across all posts, ordered by how often they appear so the
@@ -98,7 +103,7 @@ export default function BlogIndexClient({ posts }) {
                 className={'blog-chip' + (active === t ? ' is-active' : '')}
                 onClick={() => setActive(t)}
               >
-                {t}
+                {tagLabels[t] ?? t}
               </button>
             ))}
           </div>
@@ -110,11 +115,11 @@ export default function BlogIndexClient({ posts }) {
         <div className="container">
           <div className="blog-grid">
             {filtered.map((p) => (
-              <PostCard key={p.slug} post={p} t={t} locale={locale} />
+              <PostCard key={p.slug} post={p} t={t} locale={locale} tagLabels={tagLabels} />
             ))}
           </div>
           {filtered.length === 0 && (
-            <p className="blog-empty">{t('index.empty', { tag: active })}</p>
+            <p className="blog-empty">{t('index.empty', { tag: tagLabels[active] ?? active })}</p>
           )}
         </div>
       </section>

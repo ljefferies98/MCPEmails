@@ -25,11 +25,12 @@
  * No em dashes, no fake "Re:", no urgency.
  */
 
-import { PLANS, FREE_ACTION_ALLOWANCE, type Plan } from '@/lib/stripe/plans';
+import { PLANS, FREE_ACTION_ALLOWANCE, PERSONAL_PASS_3M, type Plan } from '@/lib/stripe/plans';
 import { annualOfferFromPlan, formatPriceCents } from '@/lib/stripe/annual-offer';
 import { pricingCompareHref } from '@/lib/billing/upgrade-intent.mjs';
 import { appUrl, unsubscribeUrl } from '@/lib/email/lifecycle';
 import { POSTAL_ADDRESS_LINE } from '@/lib/email/legal';
+import { unsubscribeReasonFor, type LifecycleArm } from '@/lib/email/lifecycle-region';
 
 // ---------------------------------------------------------------------------
 // HTML shell
@@ -129,6 +130,30 @@ export interface PaywallFollowupInput {
   paywallKind: PaywallKind;
   /** The recipient's own users.unsubscribe_token. Required; null = no email. */
   unsubscribeToken: string | null | undefined;
+  /**
+   * Step 3 only: the 3-month Personal pass line for a workspace in the pass
+   * arm of the holdout test. Placed after every subscription option, never
+   * the call to action. Null or absent: the email is exactly as before.
+   */
+  pass?: PaywallPassLine | null;
+  /**
+   * consented (default) or soft_opt_in; only the unsubscribe footer differs.
+   * The service_notice arm never gets these emails (composePaywallNotice).
+   */
+  arm?: Exclude<LifecycleArm, 'service_notice'>;
+}
+
+export interface PaywallPassLine {
+  /** The end date a pass bought on the send day runs to, already formatted. */
+  endsOn: string;
+  /** The pass checkout start URL, absolute. */
+  url: string;
+}
+
+/** The pass sentence of step 3. Exported for the test. */
+export function passSentence(pass: PaywallPassLine): string {
+  const price = formatPriceCents(PERSONAL_PASS_3M.priceCents);
+  return `If you would rather not subscribe: ${PLANS.personal.name}, 3 months, paid once, ${price}. Nothing renews. Bought today, it runs until ${pass.endsOn}, then your account goes back to Free.`;
 }
 
 export interface ComposedPaywallFollowup {
@@ -153,6 +178,8 @@ const SIGN_OFF = ['Asgeir', 'MCPEmails'];
 // Plan facts, from the catalogue
 // ---------------------------------------------------------------------------
 
+// USD on purpose, also after EUR prices launch: a Free workspace has never
+// been charged, so its currency is unknown. The digits are the EUR price too.
 function monthly(plan: Plan): string {
   return formatPriceCents(plan.monthlyPriceCents);
 }
@@ -238,6 +265,8 @@ function openingLine(kind: PaywallKind, step: PaywallFollowupStep): string {
 export function composePaywallFollowup(input: PaywallFollowupInput): ComposedPaywallFollowup | null {
   const token = typeof input.unsubscribeToken === 'string' ? input.unsubscribeToken.trim() : '';
   if (!token) return null;
+  if ((input.arm as LifecycleArm | undefined) === 'service_notice') return null;
+  const unsubscribeReason = unsubscribeReasonFor(input.arm ?? 'consented', 'paywall');
 
   const base = appUrl();
   const unsub = unsubscribeUrl(token, PAYWALL_FOLLOWUP_CATEGORY);
@@ -290,6 +319,7 @@ export function composePaywallFollowup(input: PaywallFollowupInput): ComposedPay
         `${personal.name}, ${monthly(personal)} a month: ${inboxPhrase(personal)}, ${lowerFirst(noCap)}, ${lowerFirst(catalogueFeature(personal, 'email support'))}.`,
         `${pro.name}, ${monthly(pro)} a month: ${inboxPhrase(pro)}, ${lowerFirst(catalogueFeature(pro, `everything in ${personal.name}`))}.`,
         ...(annual ? [annual] : []),
+        ...(input.pass ? [`${passSentence(input.pass)} ${input.pass.url}`] : []),
         'Scheduled send and the approval hold are on every plan, Free included. Your Free account stays as it is whatever you decide.',
       ];
       ctaLabel = 'Compare plans';
@@ -312,7 +342,7 @@ export function composePaywallFollowup(input: PaywallFollowupInput): ComposedPay
     '',
     ...SIGN_OFF,
     '',
-    `${UNSUBSCRIBE_REASON} Unsubscribe: ${unsub}`,
+    `${unsubscribeReason} Unsubscribe: ${unsub}`,
     'Billing and account notices are separate and are not affected.',
     '',
     POSTAL_ADDRESS_LINE,
@@ -325,7 +355,7 @@ export function composePaywallFollowup(input: PaywallFollowupInput): ComposedPay
     ctaLabel,
     footerNote: 'Replies come straight to me, not a ticket queue.',
     unsubscribeUrl: unsub,
-    unsubscribeReason: UNSUBSCRIBE_REASON,
+    unsubscribeReason,
   });
 
   return {
@@ -339,3 +369,97 @@ export function composePaywallFollowup(input: PaywallFollowupInput): ComposedPay
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// The service notice (European or unknown-region owners without consent)
+//
+// ONE email, caused by the reader's own action, purely informative: what
+// happened, what Free includes, where to manage inboxes and usage, and a
+// neutral link to the plans. No price, no offer, no discount, no "upgrade",
+// no follow-ups. Same footer and opt-out as every lifecycle email.
+// ---------------------------------------------------------------------------
+
+export interface PaywallNoticeInput {
+  paywallKind: PaywallKind;
+  unsubscribeToken: string | null | undefined;
+}
+
+export function composePaywallNotice(input: PaywallNoticeInput): ComposedPaywallFollowup | null {
+  const token = typeof input.unsubscribeToken === 'string' ? input.unsubscribeToken.trim() : '';
+  if (!token) return null;
+
+  const base = appUrl();
+  const unsub = unsubscribeUrl(token, PAYWALL_FOLLOWUP_CATEGORY);
+  const unsubscribeReason = unsubscribeReasonFor('service_notice', 'paywall');
+  const free = PLANS.free;
+  const inboxesUrl = `${base}/dashboard/inboxes`;
+  const usageUrl = `${base}/dashboard/usage`;
+  const plansUrl = `${base}/pricing`;
+
+  let what: string;
+  let ctaUrl: string;
+  let ctaLabel: string;
+  if (input.paywallKind === 'action_cap') {
+    what = `Your workspace has used the ${FREE_ACTION_ALLOWANCE} email actions the Free plan includes this month. Email actions are refused until the count resets on the 1st of next month.`;
+    ctaUrl = usageUrl;
+    ctaLabel = 'See your usage';
+  } else if (input.paywallKind === 'inbox_cap') {
+    what = `Your workspace reached the Free plan's limit of ${inboxPhrase(free)}, so another inbox could not be added.`;
+    ctaUrl = inboxesUrl;
+    ctaLabel = 'Manage your inboxes';
+  } else {
+    what = 'Your workspace reached a limit on the Free plan.';
+    ctaUrl = usageUrl;
+    ctaLabel = 'See your usage';
+  }
+
+  const paragraphs = [
+    what,
+    `The Free plan includes ${inboxPhrase(free)} and ${FREE_ACTION_ALLOWANCE} email actions a month. Scheduled send and the approval hold are included too.`,
+    'Nothing has been deleted, and everything else in your account works as before.',
+    `Your connected inboxes: ${inboxesUrl}`,
+    `This month's usage: ${usageUrl}`,
+    `What each plan includes: ${plansUrl}`,
+  ];
+  const subject = 'Your MCPEmails workspace reached a Free plan limit';
+  const title = 'A Free plan limit was reached';
+
+  const text = [
+    'Hi,',
+    '',
+    ...paragraphs.flatMap((para) => [para, '']),
+    'MCPEmails',
+    '',
+    `${unsubscribeReason} Unsubscribe: ${unsub}`,
+    'Billing and account notices are separate and are not affected.',
+    '',
+    POSTAL_ADDRESS_LINE,
+  ].join('\n');
+
+  const html = shell({
+    title,
+    html: p('Hi,') + paragraphs.map((para) => p(para)).join(''),
+    ctaUrl,
+    ctaLabel,
+    footerNote: 'This is a one-time notice about your workspace.',
+    unsubscribeUrl: unsub,
+    unsubscribeReason,
+  });
+
+  return {
+    subject,
+    text,
+    html,
+    unsubscribeUrl: unsub,
+    headers: {
+      'List-Unsubscribe': `<${unsub}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    },
+  };
+}
+
+// The same HTML shell and paragraph helper for the other one-off lifecycle
+// emails (pro-price-notice.ts, black-week-email-template.ts), so every
+// lifecycle email keeps one look and one footer.
+export { shell as lifecycleShell, p as lifecycleParagraph, UNSUBSCRIBE_REASON as LIFECYCLE_UNSUBSCRIBE_REASON };
+export type { ShellOptions as LifecycleShellOptions };

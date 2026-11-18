@@ -70,6 +70,13 @@ export interface MailEnv {
   apiKey: ApiKeyRow;
   /** May this caller run write and send ops. */
   canWrite: boolean;
+  /**
+   * May this caller see this inbox (the visibility rule, ../visibility.ts).
+   * Checked before anything else touches an inbox id, the shared row and
+   * health caches included. Absent: no per-person rule (the new-mail watcher,
+   * which acts for the workspace and filters its recipients instead).
+   */
+  canSee?: (inboxId: string) => boolean;
   /** Runs a task after the response; failures go to `onBackgroundError`. */
   onBackgroundError?: (name: string, error: unknown) => void;
   /**
@@ -84,6 +91,13 @@ export interface MailEnv {
   onLoginRefused?: (inboxId: string) => void;
   /** A login this request dialled worked for an inbox whose row carries a refusal marker: clear it. */
   onLoginAccepted?: (inboxId: string) => void;
+  /**
+   * The executor answered that this inbox is gone or needs reconnecting (for
+   * example it was disconnected in the dashboard). The row cache is already
+   * evicted; this lets the caller drop what else it holds for the workspace,
+   * such as its inbox list.
+   */
+  onInboxGone?: (inboxId: string) => void;
   /**
    * When this request arrived, as `pool.arrival()` taken at the top of the
    * handler: its place in every per-inbox IMAP queue it joins. Absent (tests,
@@ -121,6 +135,19 @@ function isThrottledSearchResult(outcome: ExecutorOutcome): boolean {
   return at !== -1 && isSearchThrottle(new Error(resultText(outcome.result).slice(at)));
 }
 
+/** The executor's own answer for an inbox id that does not resolve, word for word. */
+const INBOX_NOT_FOUND_TEXT = "No inbox matches the given inbox_id/inbox. Call inbox_list to see " +
+  "the available inboxes (each with its inbox_id and email address).";
+
+/**
+ * Refuse an inbox this person may not see with exactly the answer a
+ * non-existent inbox gets, so the response says nothing about whether it exists.
+ */
+export function assertVisible(env: MailEnv, inboxId: string | null): void {
+  if (!inboxId || !env.canSee) return;
+  if (!env.canSee(inboxId.toLowerCase())) throw executorError("inbox_not_found", INBOX_NOT_FOUND_TEXT);
+}
+
 /**
  * Refuse, without contacting the mail host, an inbox that is already known to
  * need reconnecting: its row says so, or a login with the credentials it has
@@ -128,6 +155,7 @@ function isThrottledSearchResult(outcome: ExecutorOutcome): boolean {
  * the marker on the row, in any other). See mail/health.ts.
  */
 export function assertReachable(env: MailEnv, inboxId: string | null): void {
+  assertVisible(env, inboxId);
   if (!inboxId || !env.health) return;
   const workspaceId = env.apiKey.workspace_id;
   const state = env.health.state(inboxId, workspaceId);
@@ -158,6 +186,7 @@ export function mailError(env: MailEnv, inboxId: string | null, outcome: Executo
       retryAfter: 15,
     });
   }
+  if (outcome.logErrorCode === "transport_not_configured") return partialConnectionError(outcome.result);
   if (outcome.logErrorCode !== "auth_failed") return executorError(outcome.logErrorCode, resultText(outcome.result));
   let provider = inboxId ? env.health?.provider(inboxId, env.apiKey.workspace_id) ?? null : null;
   // The row was never seen by this isolate's health map: the tool layer's own
@@ -166,9 +195,39 @@ export function mailError(env: MailEnv, inboxId: string | null, outcome: Executo
   return new ApiError(409, "reconnect_required", reconnectMessage(provider), { toolCode: "auth_failed" });
 }
 
+/**
+ * A receive-only or send-only inbox asked for the half it does not have (see
+ * mcp-server/connection-access.ts). The tool layer's text is written for an
+ * agent ("do not retry"); the person using the app gets a sentence of their
+ * own. Not `reconnect_required`: nothing is broken, and the app must not offer
+ * a reconnect as the fix for a mailbox that is working as connected.
+ */
+function partialConnectionError(result: unknown): ApiError {
+  // The raw block, not resultText(): that unwraps the JSON to its agent-facing
+  // `message`, and `missing` is the field this needs.
+  const text = (result as ToolResultShape | null)?.content?.find((block) => block?.type === "text")?.text;
+  let missing: unknown = null;
+  try {
+    missing = typeof text === "string" ? (JSON.parse(text) as { missing?: unknown }).missing : null;
+  } catch {
+    // Not the structured body; fall through to the generic sentence.
+  }
+  const message = missing === "imap"
+    ? "This inbox is connected for sending only, so its mail can't be read or organized here."
+    : missing === "smtp"
+    ? "This inbox is connected for receiving only, so it can't send mail."
+    : "This inbox isn't connected for this.";
+  return new ApiError(422, "invalid_request", message, { toolCode: "transport_not_configured" });
+}
+
 export type MailOutcome =
   | { type: "json"; result: unknown; timings: OpTimings }
   | { type: "binary"; body: Uint8Array<ArrayBuffer>; contentType: string; filename: string; timings: OpTimings };
+
+/** Tool error codes after which a cached `inboxes` row must be read again. */
+const INBOX_ROW_EVICT_CODES = new Set(["auth_failed", "inbox_not_found", "inbox_needs_reconnect"]);
+/** Tool error codes that mean the inbox is no longer usable as listed. */
+const INBOX_GONE_CODES = new Set(["inbox_not_found", "inbox_needs_reconnect"]);
 
 /** `inboxes` rows, per isolate, for at most `ttlMs`. Keyed by inbox id, checked against the workspace. */
 export class InboxRowCache {
@@ -248,8 +307,12 @@ export function firstPartyFor(
     trashIds: true,
     listPreviewBytes: options.previewBytes,
     threadHeaders: options.threads === true,
-    inboxRow: options.fresh ? undefined : (id, workspaceId) => env.inboxes.get(id, workspaceId),
+    // The shared row cache answers only for an inbox this caller may see.
+    inboxRow: options.fresh
+      ? undefined
+      : (id, workspaceId) => (env.canSee && !env.canSee(String(id).toLowerCase()) ? null : env.inboxes.get(id, workspaceId)),
     rememberInboxRow: (row) => {
+      if (env.canSee && !env.canSee(String((row as InboxRow).id).toLowerCase())) return;
       env.inboxes.remember(row as InboxRow);
       env.health?.observe(row as HealthRow);
     },
@@ -369,6 +432,7 @@ export async function runExecutor(
   },
 ): Promise<ExecutorOutcome> {
   const apiKey = options.apiKey ?? env.apiKey;
+  assertVisible(env, options.inboxId);
   assertReachable(env, options.inboxId);
   const args: Record<string, unknown> = { ...call.args };
   if (options.inboxId) args["inbox_id"] = options.inboxId;
@@ -495,8 +559,11 @@ export async function runExecutor(
 
     if (isErrorOutcome(outcome)) {
       const code = outcome.logErrorCode;
-      if (options.inboxId && (code === "auth_failed" || code === "inbox_not_found")) {
+      if (options.inboxId && INBOX_ROW_EVICT_CODES.has(String(code))) {
         env.inboxes.forget(options.inboxId);
+      }
+      if (options.inboxId && INBOX_GONE_CODES.has(String(code))) {
+        env.onInboxGone?.(options.inboxId);
       }
     }
     return outcome;
@@ -562,6 +629,7 @@ export async function runMailOp(
   timings: OpTimings = newTimings(),
 ): Promise<MailOutcome> {
   const { spec, calls, inboxId, idempotencyKey } = planMailRequest(request);
+  assertVisible(env, inboxId);
   if (spec.kind !== "read" && !env.canWrite) {
     throw forbidden("Your role in this workspace is read-only.");
   }

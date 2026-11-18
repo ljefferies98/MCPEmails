@@ -1,12 +1,15 @@
 import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { metaAlternates, localePath, OG_LOCALE, APP_URL } from '@/i18n/seo';
 import { getAllPosts, getAuthor, getLocalizedPost } from '@/lib/blog/posts';
+import { tagLabelMap } from '@/lib/blog/tag-labels.mjs';
 import { readingTime } from '@/lib/blog/markdown';
 import { blogPostCanonicalLocale } from '@/lib/blog/seo.mjs';
 import BlogIndexClient from '../../../components/marketing/BlogIndexClient';
+import { requireLocale } from '@/i18n/require-locale';
 
 export async function generateMetadata({ params }) {
   const { locale } = await params;
+  requireLocale(locale);
   const t = await getTranslations({ locale, namespace: 'blog' });
   const title = t('meta.title');
   const description = t('meta.description');
@@ -19,13 +22,13 @@ export async function generateMetadata({ params }) {
     openGraph: {
       type: 'website',
       url: localePath(locale, '/blog'),
-      title: `${title} · mcpemails`,
+      title: `${title} · MCPEmails`,
       description,
       locale: OG_LOCALE[locale],
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${title} · mcpemails`,
+      title: `${title} · MCPEmails`,
       description,
     },
   };
@@ -33,6 +36,7 @@ export async function generateMetadata({ params }) {
 
 export default async function BlogIndexPage({ params }) {
   const { locale } = await params;
+  requireLocale(locale);
   setRequestLocale(locale);
   const t = await getTranslations({ locale, namespace: 'blog' });
 
@@ -40,7 +44,7 @@ export default async function BlogIndexPage({ params }) {
   // the active locale (falling back to English when not translated).
   const posts = getAllPosts().map((raw) => {
     const p = getLocalizedPost(raw.slug, locale);
-    const author = getAuthor(p);
+    const author = getAuthor(p, locale);
     return {
       slug: p.slug,
       title: p.title,
@@ -55,6 +59,8 @@ export default async function BlogIndexPage({ params }) {
       canonicalLocale: blogPostCanonicalLocale(p, locale),
     };
   });
+  // Tags stay English keys (the filter matches on them); the chips show these.
+  const tagLabels = tagLabelMap(posts.flatMap((p) => p.tags), locale);
 
   // Blog + ItemList structured data for rich results / AI discovery.
   const jsonLd = {
@@ -66,7 +72,7 @@ export default async function BlogIndexPage({ params }) {
     inLanguage: locale,
     publisher: {
       '@type': 'Organization',
-      name: 'mcpemails',
+      name: 'MCPEmails',
       url: APP_URL,
       logo: { '@type': 'ImageObject', url: `${APP_URL}/logo-mark.svg` },
     },
@@ -87,7 +93,7 @@ export default async function BlogIndexPage({ params }) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <BlogIndexClient posts={posts} />
+      <BlogIndexClient posts={posts} tagLabels={tagLabels} />
     </>
   );
 }

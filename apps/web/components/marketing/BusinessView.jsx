@@ -2,6 +2,7 @@ import { Link } from '@/i18n/navigation';
 import { Nav, Footer } from './Sections';
 import { MIcon } from '../MarketingPrimitives';
 import RichText from './RichText';
+import { withReadingLang } from '@/i18n/reading-lang.mjs';
 
 /**
  * /for/business, rendered on the server.
@@ -25,9 +26,15 @@ const DOES_ICONS = { read: 'inbox', send: 'mail', schedule: 'refresh', organize:
 const SAFETY_KEYS = ['approval', 'stored', 'keys', 'server'];
 const SAFETY_ICONS = { approval: 'shield', stored: 'ghost', keys: 'lock', server: 'server' };
 const PLAN_KEYS = ['free', 'personal', 'pro'];
+// Business billed per person (`business_seat_pricing` on) only: the page server
+// adds `copy.team` and `pricing.items.business` (src/lib/billing/business-seat-copy.ts).
+// Absent, neither section nor card renders and the page is as it was.
+const TEAM_KEYS = ['private', 'company', 'agent', 'rules', 'audit', 'paperwork'];
+const TEAM_ICONS = { private: 'lock', company: 'inbox', agent: 'cpu', rules: 'shield', audit: 'check', paperwork: 'eu' };
 
-export default function BusinessView({ copy }) {
-  const { hero, pains, day, does, safety, providers, pricing, faq, ctaBand } = copy;
+export default function BusinessView({ copy, locale }) {
+  const { hero, pains, day, does, safety, providers, pricing, faq, ctaBand, team } = copy;
+  const planKeys = pricing.items.business ? [...PLAN_KEYS, 'business'] : PLAN_KEYS;
 
   return (
     <div>
@@ -41,12 +48,36 @@ export default function BusinessView({ copy }) {
             {hero.titleLine1}<br />{hero.titleLine2}
           </h1>
           <p className="pricing-page-lead">{hero.lead}</p>
-          <div className="hero-cta" style={{ justifyContent: 'center', marginTop: 24 }}>
-            <a className="btn btn-primary btn-lg" href="/signup">{hero.ctaPrimary}</a>
+          <div className="hero-cta" style={{ marginTop: 24 }}>
+            <a className="btn btn-primary btn-lg" href={withReadingLang('/signup', locale)}>{hero.ctaPrimary}</a>
             <a className="btn btn-secondary btn-lg" href="#day">{hero.ctaSecondary}</a>
           </div>
         </div>
       </section>
+
+      {/* A team: private mailboxes per person, shared ones company-wide */}
+      {team && (
+        <section className="section" id="team" style={{ background: 'var(--bg-page)' }}>
+          <div className="container">
+            <div className="section-head" style={{ marginBottom: 32 }}>
+              <div className="eye-label">{team.eyebrow}</div>
+              <h2 style={{ fontSize: 36 }}>{team.title}</h2>
+              <p className="sub">{team.sub}</p>
+            </div>
+            <div className="founder-does-grid">
+              {TEAM_KEYS.map((k) => (
+                <div className="founder-does-card" key={k}>
+                  <div className="founder-does-icon">
+                    <MIcon name={TEAM_ICONS[k]} size={20} color="var(--mint-600)" />
+                  </div>
+                  <h3>{team.items[k].h}</h3>
+                  <p>{team.items[k].p}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* The job: several role addresses, one person */}
       <section className="section principles">
@@ -147,7 +178,7 @@ export default function BusinessView({ copy }) {
             <h2>{providers.title}</h2>
             <p className="sub">{providers.sub}</p>
           </div>
-          <div className="hero-cta" style={{ justifyContent: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+          <div className="hero-cta" style={{ marginTop: 8, flexWrap: 'wrap' }}>
             <Link className="btn btn-secondary" href="/connect/imap">{providers.ctaImap}</Link>
             <Link className="btn btn-secondary" href="/connect/gmail">{providers.ctaGmail}</Link>
             <Link className="btn btn-secondary" href="/connect/office365">{providers.ctaMicrosoft}</Link>
@@ -167,8 +198,8 @@ export default function BusinessView({ copy }) {
             <h2 style={{ fontSize: 36 }}>{pricing.title}</h2>
             <p className="sub">{pricing.sub}</p>
           </div>
-          <div className="founder-does-grid business-plan-grid">
-            {PLAN_KEYS.map((k) => (
+          <div className={'founder-does-grid business-plan-grid' + (planKeys.length === 4 ? ' business-plan-grid-4' : '')}>
+            {planKeys.map((k) => (
               <div className="founder-does-card" key={k}>
                 <h3>{pricing.items[k].h}</h3>
                 <p>{pricing.items[k].p}</p>
@@ -207,7 +238,7 @@ export default function BusinessView({ copy }) {
           <h2 className="pricing-cta-h">{ctaBand.title}</h2>
           <p className="pricing-cta-sub">{ctaBand.sub}</p>
           <div className="pricing-cta-btns">
-            <a className="btn btn-primary btn-lg" href="/signup">{ctaBand.ctaPrimary}</a>
+            <a className="btn btn-primary btn-lg" href={withReadingLang('/signup', locale)}>{ctaBand.ctaPrimary}</a>
             <Link className="btn btn-on-dark btn-lg" href="/docs">{ctaBand.ctaSecondary}</Link>
           </div>
         </div>

@@ -3,7 +3,7 @@
     "title": "Blog",
     "description": "Guías sobre agentes de IA, MCP y cómo conectar Gmail, Outlook, Fastmail y otros buzones IMAP a Claude, Cursor y clientes MCP."
   },
-  "blogName": "Blog de mcpemails",
+  "blogName": "Blog de MCPEmails",
   "index": {
     "eyebrow": "El blog de MCPEmails",
     "title": "Notas sobre agentes, correo y MCP",
@@ -25,6 +25,7 @@
       "sub": "Conecta Gmail, Outlook, Fastmail o cualquier cuenta IMAP a tu agente de IA en minutos.",
       "primary": "Empieza gratis",
       "secondary": "Leer la documentación"
-    }
+    },
+    "breadcrumbAria": "Ruta de navegación"
   }
 }

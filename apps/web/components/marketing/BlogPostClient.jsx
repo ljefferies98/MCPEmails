@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import { Nav, Footer } from './Sections';
+import { withReadingLang } from '@/i18n/reading-lang.mjs';
 
 function fmtDate(iso, locale) {
   return new Date(iso).toLocaleDateString(locale, {
@@ -99,7 +100,7 @@ export default function BlogPostClient({ post }) {
       <article className="blog-post">
         <div className="container" style={{ maxWidth: 1080 }}>
           {/* Breadcrumb */}
-          <nav className="blog-crumbs" aria-label="Breadcrumb">
+          <nav className="blog-crumbs" aria-label={t('post.breadcrumbAria')}>
             <Link href="/">{t('post.home')}</Link>
             <span aria-hidden="true">/</span>
             <Link href="/blog">{t('post.blog')}</Link>
@@ -110,8 +111,8 @@ export default function BlogPostClient({ post }) {
           {/* Header */}
           <header className="blog-head">
             <div className="blog-card-tags">
-              {post.tags.map((t) => (
-                <span className="blog-tag" key={t}>{t}</span>
+              {post.tags.map((tag) => (
+                <span className="blog-tag" key={tag}>{post.tagLabels?.[tag] ?? tag}</span>
               ))}
             </div>
             <h1 className="blog-title">{post.title}</h1>
@@ -199,13 +200,15 @@ export default function BlogPostClient({ post }) {
           <h2 className="pricing-cta-h">{t('post.cta.title')}</h2>
           <p className="pricing-cta-sub">{t('post.cta.sub')}</p>
           <div className="pricing-cta-btns">
-            <a className="btn btn-primary btn-lg" href="/signup">{t('post.cta.primary')}</a>
+            <a className="btn btn-primary btn-lg" href={withReadingLang('/signup', locale)}>{t('post.cta.primary')}</a>
             <Link className="btn btn-on-dark btn-lg" href="/docs">{t('post.cta.secondary')}</Link>
           </div>
         </div>
       </section>
 
-      <Footer />
+      {/* Only the locales the post is translated into: an English fallback URL
+          canonicalises to English, so the switcher sends those to the home page. */}
+      <Footer locales={post.locales} />
 
       <style>{`
         /* progress bar */
@@ -339,6 +342,16 @@ export default function BlogPostClient({ post }) {
           color: var(--fg-2); font-size: 18px; font-style: italic; line-height: 1.6;
         }
         .blog-prose hr { border: none; border-top: 1px solid var(--border-1); margin: 40px 0; }
+        .blog-prose .blog-table-wrap { margin: 0 0 24px; overflow-x: auto; }
+        .blog-prose table {
+          width: 100%; min-width: 560px; border-collapse: collapse;
+          font-size: 15px; line-height: 1.55; color: var(--fg-1);
+        }
+        .blog-prose th {
+          text-align: left; font-weight: 700; color: var(--fg-0);
+          padding: 10px 12px; border-bottom: 1px solid var(--border-1);
+        }
+        .blog-prose td { padding: 10px 12px; border-bottom: 1px solid var(--border-1); vertical-align: top; }
         .blog-prose figure { margin: 0 0 24px; }
         .blog-prose figure img { width: 100%; border-radius: var(--radius-lg); display: block; }
         .blog-prose figcaption { font-size: 13px; color: var(--fg-3); text-align: center; margin-top: 8px; }

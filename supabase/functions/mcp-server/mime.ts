@@ -20,6 +20,12 @@ export interface MimeAttachment {
   size: number;
   /** Decoded binary content. */
   content: Uint8Array;
+  /**
+   * The part's Content-ID without angle brackets, when it has one. A named
+   * part the HTML shows through `cid:` is an inline image, not a file, and a
+   * draft rebuild must not turn it into one (draft-attachments.ts).
+   */
+  contentId?: string;
 }
 
 export interface ParsedEmail {
@@ -149,18 +155,20 @@ function parsePart(
     return;
   }
 
-  // Leaf part.
-  const bytes = decodeContent(body, cte);
-
   if (isAttachment) {
-    out.attachments.push({
-      filename: attachmentFilename(ct, disposition),
-      mimeType: ct.mediaType,
-      size: bytes.length,
-      content: bytes,
-    });
+    const contentId = (getHeader(headers, "content-id") ?? "").trim().replace(/^<|>$/g, "");
+    out.attachments.push(attachmentPart(
+      attachmentFilename(ct, disposition),
+      ct.mediaType,
+      body,
+      cte,
+      contentId || undefined,
+    ));
     return;
   }
+
+  // Leaf part.
+  const bytes = decodeContent(body, cte);
 
   // No charset parameter is passed on as "": `decodeCharset` then looks at the
   // octets instead of assuming.
@@ -172,6 +180,76 @@ function parsePart(
   } else if (ct.mediaType.startsWith("text/") && out.text === null) {
     out.text = decodeCharset(bytes, charset, cutTail);
   }
+}
+
+// ---------------------------------------------------------------------------
+// The leaves of a message, for a caller that is about to REBUILD it
+// (2026-10-13).
+//
+// `parseEmail` answers "what does this message say": the first text/plain, the
+// first text/html, and the parts that look like files. Everything else it
+// meets it drops without a trace, which is right for reading and wrong for a
+// caller that will write the message back from those three fields. A draft
+// update on IMAP or Gmail is exactly that caller: a second text part, an inline
+// image with a Content-ID and no filename, a text/calendar alternative or a
+// signature part is simply absent from the rebuilt message, and the tool
+// reports success.
+//
+// So this walks the same tree with the same splitting and the same attachment
+// rule, and reports every leaf it finds, including the ones `parseEmail` has no
+// slot for. It decodes nothing and is cheap. The decision about which leaves a
+// rebuild can carry is the caller's (draft-rebuild.ts), not this parser's.
+// ---------------------------------------------------------------------------
+
+/** One leaf part of a message, as far as a rebuild needs to know it. */
+export interface MimeLeaf {
+  /** Lowercased media type. A multipart that cannot be split is reported as itself. */
+  mediaType: string;
+  /** The rule `parseEmail` uses: a disposition, a `name` or a `filename`. */
+  attachment: boolean;
+  /** `format=flowed` on a text part (RFC 3676): its line breaks are not literal. */
+  flowed: boolean;
+  /** The part's Content-ID without angle brackets, when it has one. */
+  contentId?: string;
+}
+
+/** Every leaf part of a raw message (a byte string), in document order. */
+export function mimeLeafParts(raw: string): MimeLeaf[] {
+  const { headerBlock, body } = splitHeadersBody(raw);
+  const leaves: MimeLeaf[] = [];
+  collectLeaves(parseHeaders(headerBlock), body, leaves);
+  return leaves;
+}
+
+function collectLeaves(headers: Map<string, string[]>, body: string, out: MimeLeaf[]): void {
+  const ct = parseContentType(getHeader(headers, "content-type"));
+  const disposition = getHeader(headers, "content-disposition") ?? "";
+  // Kept identical to `parsePart`, on purpose: the two must agree on what an
+  // attachment is, or a part could be counted by neither.
+  const attachment = /attachment/i.test(disposition) ||
+    (!!ct.params["name"] || /filename=/i.test(disposition));
+
+  if (ct.mediaType.startsWith("multipart/")) {
+    const boundary = ct.params["boundary"];
+    // `parsePart` returns here and the whole subtree is lost. Reported as one
+    // opaque leaf so a caller sees that there was something.
+    if (!boundary) {
+      out.push({ mediaType: ct.mediaType, attachment: false, flowed: false });
+      return;
+    }
+    for (const sub of splitMultipart(body, boundary)) {
+      const { headerBlock, body: subBody } = splitHeadersBody(sub);
+      collectLeaves(parseHeaders(headerBlock), subBody, out);
+    }
+    return;
+  }
+  const contentId = (getHeader(headers, "content-id") ?? "").trim().replace(/^<|>$/g, "");
+  out.push({
+    mediaType: ct.mediaType,
+    attachment,
+    flowed: (ct.params["format"] ?? "").toLowerCase() === "flowed",
+    ...(contentId ? { contentId } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -381,16 +459,13 @@ function joinedPart(
     );
   }
 
-  const bytes = decodeContent(body, cte);
   if (isAttachment) {
-    (depth === 0 ? out.attachments : out.embeddedAttachments).push({
-      filename: attachmentFilename(ct, disposition),
-      mimeType: ct.mediaType,
-      size: bytes.length,
-      content: bytes,
-    });
+    (depth === 0 ? out.attachments : out.embeddedAttachments).push(
+      attachmentPart(attachmentFilename(ct, disposition), ct.mediaType, body, cte),
+    );
     return NOTHING_SHOWN;
   }
+  const bytes = decodeContent(body, cte);
   const charset = ct.params["charset"] ?? "";
   if (ct.mediaType === "text/plain") return { text: decodeCharset(bytes, charset), html: null };
   if (ct.mediaType === "text/html") return { text: null, html: decodeCharset(bytes, charset) };
@@ -554,6 +629,78 @@ function splitMultipart(body: string, boundary: string): string[] {
 }
 
 /** Decode a part body (a byte string) into bytes per its transfer encoding. */
+/**
+ * An attachment whose bytes are decoded the first time `content` is read.
+ *
+ * Most reads never touch the bytes: email_read reports each file's name and
+ * size and returns no data unless asked. Decoding every attachment anyway is
+ * what made one message with a 25 MB file cost about 100 MB of heap to parse
+ * (the cleaned base64 copy, `atob`'s string and the byte array, all live at
+ * once). The function runs in a 256 MB isolate shared by concurrent requests,
+ * so two such reads at once killed the worker and every request in it
+ * ("Memory limit exceeded", HTTP 546; 69 in 18 minutes on 2026-10-28).
+ *
+ * The size comes from {@link base64DecodedLength}, which equals the decoded
+ * length exactly. A body that function cannot vouch for, and every non-base64
+ * body, is decoded at once as before. The getter caches, so a caller that
+ * reads `content` twice decodes once.
+ */
+function attachmentPart(
+  filename: string,
+  mimeType: string,
+  body: string,
+  cte: string,
+  contentId?: string,
+): MimeAttachment {
+  const size = cte === "base64" ? base64DecodedLength(body) : null;
+  const meta = { filename, mimeType, ...(contentId ? { contentId } : {}) };
+  if (size === null) {
+    const bytes = decodeContent(body, cte);
+    return { ...meta, size: bytes.length, content: bytes };
+  }
+  let decoded: Uint8Array | null = null;
+  const part = { ...meta, size } as MimeAttachment;
+  Object.defineProperty(part, "content", {
+    enumerable: true,
+    configurable: true,
+    get: () => (decoded ??= decodeContent(body, "base64")),
+  });
+  return part;
+}
+
+/**
+ * What `decodeContent(body, "base64").length` will be, read without
+ * allocating, or null when the decode would not take its `atob` path (a `=`
+ * anywhere but the last two places of the whole quanta makes `atob` throw and
+ * `decodeContent` fall back to the raw octets). Mirrors decodeContent: only
+ * base64 alphabet characters count, and a partial trailing quantum is dropped.
+ */
+export function base64DecodedLength(body: string): number | null {
+  let n = 0;
+  // Positions (in alphabet characters) of the first few `=`. More than a
+  // handful means the body is not plain padded base64; let the decode decide.
+  const pads: number[] = [];
+  for (let i = 0; i < body.length; i++) {
+    const c = body.charCodeAt(i);
+    if (
+      (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) ||
+      c === 43 || c === 47
+    ) {
+      n++;
+    } else if (c === 61) {
+      if (pads.length === 8) return null;
+      pads.push(n++);
+    }
+  }
+  const whole = n - (n % 4);
+  const counted = pads.filter((p) => p < whole);
+  if (counted.length > 2) return null;
+  for (let k = 0; k < counted.length; k++) {
+    if (counted[k] !== whole - counted.length + k) return null;
+  }
+  return (whole / 4) * 3 - counted.length;
+}
+
 function decodeContent(body: string, cte: string): Uint8Array {
   if (cte === "base64") {
     const clean = body.replace(/[^A-Za-z0-9+/=]/g, "");

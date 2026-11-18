@@ -2,11 +2,17 @@ import { notFound } from 'next/navigation';
 import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { metaAlternatesFor, localePath, OG_LOCALE, OG_IMAGE, connectJsonLd } from '@/i18n/seo';
 import { getProvider, providerLocales } from '@/lib/connect/providers.mjs';
+import { localizeProvider } from '@/lib/connect/display-name.mjs';
 import { isViewable } from '@/lib/connect/release.mjs';
 import { getProviderContent, providerParams } from '@/lib/connect/content.mjs';
-import { getMultiMailboxCopy, multiMailboxFaq, showsMultiMailbox } from '@/lib/connect/multi-mailbox.mjs';
+import { getMultiMailboxCopy, showsMultiMailbox } from '@/lib/connect/multi-mailbox.mjs';
+import { CHATGPT_BLOG_SLUG, chatgptBlogLink, getChatgptCopy, showsChatgpt } from '@/lib/connect/chatgpt.mjs';
+import { providerFaq } from '@/lib/connect/faq.mjs';
+import { getPost, getPostLocales } from '@/lib/blog/posts';
+import { getGuideCopy, moreGuideLinksFor } from '@/lib/connect/guides.mjs';
 import { stripTags } from '../../../../components/marketing/RichText';
 import ConnectProviderView from '../../../../components/marketing/ConnectProviderView';
+import { requireLocale } from '@/i18n/require-locale';
 
 /**
  * One landing page per email provider, at /connect/<slug>.
@@ -23,6 +29,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }) {
   const { locale, provider: slug } = await params;
+  requireLocale(locale);
   const provider = getProvider(slug);
   const content = await getProviderContent(locale, slug);
   if (!provider || !content || !isViewable(provider)) return {};
@@ -35,14 +42,14 @@ export async function generateMetadata({ params }) {
     openGraph: {
       type: 'website',
       url: localePath(locale, path),
-      title: `${title} · mcpemails`,
+      title: `${title} · MCPEmails`,
       description,
       locale: OG_LOCALE[locale],
       images: [OG_IMAGE],
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${title} · mcpemails`,
+      title: `${title} · MCPEmails`,
       description,
       images: [OG_IMAGE.url],
     },
@@ -51,12 +58,16 @@ export async function generateMetadata({ params }) {
 
 export default async function ConnectProviderPage({ params }) {
   const { locale, provider: slug } = await params;
-  const provider = getProvider(slug);
+  requireLocale(locale);
+  const registered = getProvider(slug);
   // Providers are released in waves (see lib/connect/release.mjs). A wave that
   // has not opened yet has no page at all, rather than a page carrying noindex:
   // a URL that 404s costs no crawl budget, and a noindex one still gets fetched.
-  if (!provider || !isViewable(provider)) notFound();
+  if (!registered || !isViewable(registered)) notFound();
   setRequestLocale(locale);
+  // The name every shared string below interpolates: the brand, except on the
+  // generic page, where "Generic IMAP" is translated (lib/connect/display-name).
+  const provider = localizeProvider(registered, locale);
 
   const content = await getProviderContent(locale, slug);
   if (!content) notFound();
@@ -66,10 +77,26 @@ export default async function ConnectProviderPage({ params }) {
   // mailbox the company runs on this host connects to the same agent, plus a
   // matching FAQ entry (see lib/connect/multi-mailbox). Null everywhere else.
   const multiMailbox = showsMultiMailbox(provider) ? await getMultiMailboxCopy(locale) : null;
-  const faq = [
-    ...(content.faq ?? []),
-    ...(multiMailbox ? [multiMailboxFaq(multiMailbox, provider.name)] : []),
-  ];
+  // Every supported provider gets a "Use <provider> in ChatGPT" block and,
+  // except Yahoo, a matching FAQ entry (see lib/connect/chatgpt). Null on the
+  // limited pages.
+  const chatgpt = showsChatgpt(provider)
+    ? {
+        copy: await getChatgptCopy(locale),
+        blog: chatgptBlogLink(locale, getPostLocales(getPost(CHATGPT_BLOG_SLUG))),
+      }
+    : null;
+  const faq = providerFaq({ content, provider, multiMailbox, chatgptCopy: chatgpt?.copy });
+  const guides = await getGuideCopy(locale);
+  const moreGuides = moreGuideLinksFor({
+    providerSlug: slug,
+    content,
+    locale,
+    postLocales: (postSlug) => {
+      const post = getPost(postSlug);
+      return post ? getPostLocales(post) : ['en'];
+    },
+  });
   const jsonLd = connectJsonLd(locale, {
     path: `/connect/${slug}`,
     title: content.meta.title,
@@ -86,7 +113,7 @@ export default async function ConnectProviderPage({ params }) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <ConnectProviderView locale={locale} provider={provider} content={content} multiMailbox={multiMailbox} />
+      <ConnectProviderView locale={locale} provider={provider} content={content} multiMailbox={multiMailbox} guides={guides} moreGuides={moreGuides} chatgpt={chatgpt} />
     </>
   );
 }

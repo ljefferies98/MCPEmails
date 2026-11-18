@@ -3,6 +3,7 @@
     "connectedSuccess": "{provider} inbox connected successfully.",
     "inboxLimitReached": "You're at the inbox limit on {plan}. Upgrade to connect more mailboxes on the same agent.",
     "tokenExchangeFailed": "Could not connect inbox. Token exchange with the provider failed. Please try again.",
+    "gmailOauthUnavailable": "Google sign-in isn't available for a new Gmail inbox in this workspace. Connect Gmail with an app password instead, which works on every plan.",
     "connectionCancelled": "Inbox connection cancelled.",
     "adminConsentRequired": "Your organisation has to approve mailbox access before you can connect Outlook. Microsoft blocks employees from approving it themselves.",
     "adminConsentAction": "Get a link for your IT admin",
@@ -10,10 +11,13 @@
     "adminConsentGrantedAction": "Connect Outlook",
     "adminConsentFailed": "Microsoft did not confirm the approval, so Outlook is still blocked. Approving needs a Microsoft 365 administrator account; send the approval link to your IT admin.",
     "adminConsentFailedAction": "Get the approval link",
-    "outlookEmailMissing": "Your Microsoft account did not give us an email address, so we could not connect it. Try a different Microsoft account, or contact support at hello@mcpemails.com.",
+    "outlookEmailMissing": "Your Microsoft account did not give us an email address, so we could not connect it. Try a different Microsoft account, or contact support at support@mcpemails.com.",
     "inboxExistsOtherProvider": "That address is already connected with a different method (for example IMAP, Gmail or Outlook), so we left that inbox untouched. If you want to switch how it is connected, remove that inbox first and then connect it again.",
-    "outlookNoMailbox": "This Microsoft account has no Outlook mailbox (Exchange Online), so there is nothing to connect. This is common for admin accounts without an Exchange licence, or when the organisation's mail is hosted elsewhere. If your mail lives on another server, connect the address with IMAP instead.",
+    "inboxOwnedByOther": "Someone else in this workspace has already connected that address as a private mailbox, so nothing changed.",
+    "privateInboxLimitReached": "You already keep the most private mailboxes allowed per person. Make one of them company-wide, then connect this one.",
+    "outlookNoMailbox": "This Microsoft account has no Outlook mailbox (Exchange Online), so there is nothing to connect. This is common for admin accounts without an Exchange licence, or when the organisation's mail is hosted elsewhere. If your mail lives on another server, connect the address with IMAP instead. Signed in with the wrong Microsoft account? Connect Outlook again and choose the right one.",
     "connectionFailed": "Inbox connection failed ({error}). Please try again.",
+    "contactSupport": "Contact support",
     "checkoutSuccess": "Welcome to {plan}. Your subscription is activating now; this may take a moment.",
     "checkoutSuccessPlanFallback": "your new plan",
     "checkoutFeedback": {
@@ -36,6 +40,8 @@
     "checkoutPanel": {
       "title": "You're on {plan}",
       "subtitle": "Payment received. A receipt is on its way to your email.",
+      "subtitleEur": "Your plan is active. If you paid by bank debit, it can take a few business days to clear, and you have full access in the meantime.",
+      "subtitleProcessing": "Your bank debit is processing, which can take a few business days. You have full access in the meantime.",
       "close": "Close",
       "planLabel": "Plan",
       "priceLabel": "Price",
@@ -51,6 +57,7 @@
       "activatingTitle": "Almost there",
       "activating": "Activating your subscription. This takes a few seconds and the page updates by itself.",
       "activatingSlow": "Your payment went through. The plan is taking longer than usual to activate; reload in a moment if it still looks unchanged.",
+      "activatingSlowNeutral": "The plan is taking longer than usual to activate. Reload in a moment if it still looks unchanged.",
       "billingDetailsNote": "Your price and renewal date are in billing.",
       "connectCta": "Connect another inbox",
       "billingCta": "View billing"
@@ -69,6 +76,8 @@
     "connectionHealthy": "Connection is healthy.",
     "inboxConnectedSuccess": "{label} connected successfully.",
     "inboxConnectedAdjusted": "{label} connected. Your server accepted IMAP {imapPort} ({imapSecurity}) and SMTP {smtpPort} ({smtpSecurity}), so those are what we saved.",
+    "inboxConnectedAdjustedImap": "{label} connected. Your server accepted IMAP {imapPort} ({imapSecurity}), so that is what we saved.",
+    "inboxConnectedAdjustedSmtp": "{label} connected. Your server accepted SMTP {smtpPort} ({smtpSecurity}), so that is what we saved.",
     "apiKeyRevokeFailed": "Failed to revoke API key.",
     "apiKeyRevoked": "API key revoked.",
     "apiKeyCreateFailed": "Failed to create API key.",
@@ -89,9 +98,17 @@
     "densityLabel": "Density",
     "densityCompact": "Compact",
     "densitySpacious": "Spacious",
-    "firstRunTitle": "Welcome to mcpemails",
+    "firstRunTitle": "Welcome to MCPEmails",
     "firstRunBody": "Connect your first inbox to get a working MCP endpoint in under a minute.",
     "firstRunCta": "Connect inbox",
+    "paymentIssueDeclined": "Your last payment did not go through. Your plan is still active while we retry.",
+    "paymentIssueDeclinedCta": "Update payment",
+    "paymentIssueConfirm": "Your bank wants you to confirm the last payment. Your plan is still active.",
+    "paymentIssueConfirmCta": "Confirm payment",
+    "inboxAlertOne": "{address} needs to be reconnected. Its sign-in stopped working, so your AI app cannot read, draft or send from it.",
+    "inboxAlertMany": "{count} inboxes need to be reconnected. Their sign-in stopped working, so your AI app cannot use them.",
+    "inboxAlertReconnect": "Reconnect",
+    "inboxAlertOpenInboxes": "Open Inboxes",
     "inviteSentNotDelivered": "Invite created for {email}, but the email could not be sent. Use Resend on the pending invite.",
     "inviteResent": "Invite resent to {email}.",
     "inviteResendFailed": "Failed to resend the invite.",
@@ -103,7 +120,7 @@
     "workspacesLabel": "Workspaces",
     "memberSuffix": "member",
     "newWorkspace": "New workspace",
-    "newWorkspaceUpsell": "Workspaces are a Team feature. See plans",
+    "newWorkspaceUpsell": "Workspaces are a Business feature. See plans",
     "sectionWorkspace": "Workspace",
     "sectionAccount": "Account",
     "navOverview": "Overview",
@@ -114,6 +131,7 @@
     "navApprovals": "Approvals",
     "navSettings": "Settings",
     "navSecurity": "Security",
+    "navHelp": "Help & support",
     "accountFallback": "Account",
     "signOut": "Sign out",
     "openMenu": "Open navigation menu",
@@ -122,7 +140,9 @@
     "searchPlaceholder": "Search pages, inboxes, members…",
     "openSearch": "Open search (Command K)",
     "navWorkflows": "Workflows",
-    "navAutomations": "Automations"
+    "navAutomations": "Automations",
+    "navInvite": "Invite a friend",
+    "invitePromo": "Give a month, get a month"
   },
   "topbar": {
     "mcpLabel": "MCP endpoint",
@@ -132,7 +152,7 @@
   },
   "connect": {
     "subOutlook": "Outlook.com · Microsoft 365",
-    "hintOutlook": "Outlook.com, Hotmail, Live and MSN accounts sign in straight away. A work or school Microsoft 365 account may need your IT admin to approve MCP Emails once; they don't need an MCP Emails account to do it.",
+    "hintOutlook": "Outlook.com, Hotmail, Live and MSN accounts sign in straight away. A work or school Microsoft 365 account may need your IT admin to approve MCPEmails once; they don't need an MCPEmails account to do it.",
     "subFastmail": "App password",
     "subAppPassword": "App password",
     "subGeneric": "Any mailbox · recommended",
@@ -145,6 +165,10 @@
     "errorPasswordRequired": "An app password is required.",
     "errorHostRequired": "IMAP and SMTP host are required.",
     "errorPortRequired": "IMAP and SMTP ports are required.",
+    "errorImapHostRequired": "IMAP host is required.",
+    "errorSmtpHostRequired": "SMTP host is required.",
+    "errorImapPortRequired": "IMAP port is required.",
+    "errorSmtpPortRequired": "SMTP port is required.",
     "errorPortRange": "That port is not one we can connect on. Mail servers use 143 or 993 for IMAP, and 25, 465 or 587 for SMTP.",
     "errorPortNotAllowedShort": "That port is not one we can connect on.",
     "errorHostNotAllowedShort": "That server is on a private network.",
@@ -170,16 +194,21 @@
     "errorSecurityShort": "The security mode does not match the port.",
     "errorLoginTakenShort": "That mailbox login is already connected.",
     "errorInboxOtherProviderShort": "That address is already connected with a different method. Remove that inbox first to switch.",
+    "errorInboxOwnedByOtherShort": "Someone else in this workspace has already connected this address as a private mailbox.",
+    "errorPrivateInboxLimitShort": "You already keep the most private mailboxes allowed per person. Make one company-wide first.",
     "errorProtocolShort": "The mail server sent an unexpected reply.",
     "errorHostNotFoundShort": "That server name does not exist.",
     "errorWhatToCheck": "What to check",
+    "errorContactSupport": "Still stuck? Contact support",
     "errorRepeatHint": "Same result twice. Check the username, the password, and the security mode before trying again.",
     "errorAuthImapDisabled": "IMAP access is switched off for this mailbox.",
     "errorAuthAppPassword": "{provider} will not accept your normal password here.",
     "errorAuthAccountPassword": "That looks like your normal password, not a {provider} app password.",
     "errorAuthAppPasswordLength": "That is not a complete {provider} app password.",
     "errorAuthLoginName": "The mail server did not recognise that login name.",
+    "errorAuthProviderRefused": "The mail provider refused this sign-in, and not because of the password.",
     "imapDisabledDetail": "Turn IMAP access on in your mail account settings, then connect again. No password can work until it is on.",
+    "providerRefusedDetail": "Your provider turned this sign-in down itself, which is not how it answers a wrong password. Some providers refuse sign-ins that come from servers like ours even when the password is right. We have recorded this attempt and are looking into it, so there is no need to change your password or keep retrying.",
     "appPasswordRequiredDetail": "An app password is a separate credential you generate in your account settings. Two-factor authentication has to be on before the option appears.",
     "appPasswordAccountDetail": "An app password is generated for you, never chosen, so it has no capital letters, digits or punctuation. Generate one and paste it here; your normal password cannot work.",
     "appPasswordLengthDetail": "A {provider} app password is 16 characters. Check for a truncated copy and paste the whole thing.",
@@ -218,12 +247,12 @@
     "subChooseProvider": "Choose a provider. Credentials are encrypted before storage and never shared.",
     "subGenericForm": "Enter your mail server settings and password.",
     "close": "Close",
-    "upgradeTitle": "Pro connects every mailbox you own",
-    "upgradeBody": "You were about to connect another inbox. Pro removes the limit for $15 a month: work, personal, and every side business on the same agent.",
-    "featureInboxes": "Unlimited connected inboxes",
+    "upgradeTitle": "Pro connects up to 10 mailboxes",
+    "upgradeBody": "You were about to connect another inbox. Pro raises the limit to 10 for $15 a month: work, personal, and every side business on the same agent.",
+    "featureInboxes": "10 connected inboxes",
     "featureRateLimit": "5x higher burst rate limit",
     "featureTeam": "Cancel any time, keep the rest of the period",
-    "featureSupport": "Email support",
+    "featureSupport": "Priority email support",
     "personalUpgradeTitle": "Personal connects three mailboxes",
     "personalUpgradeBody": "You were about to connect another inbox. Personal takes you to three for $9 a month: work, personal, and one more.",
     "personalUpgradeCta": "Upgrade to Personal, $9/mo",
@@ -232,7 +261,7 @@
     "businessUpgradeTitle": "Add the rest of your company mailboxes",
     "businessUpgradeBody": "Running info@, sales@ and invoices@ for your business? Free connects one mailbox. Pick the plan that covers the rest.",
     "businessPersonalPitch": "Three mailboxes for $9 a month, enough for info@, sales@ and your own.",
-    "businessProPitch": "Every mailbox your business runs, on one agent, for $15 a month: finance, sales, support, info, and your own.",
+    "businessProPitch": "Up to 10 of your business mailboxes on one agent, for $15 a month: finance, sales, support, info, and your own.",
     "recommendedBadge": "Recommended",
     "fastmailTabAppPassword": "App Password",
     "howToGenerate": "How to generate one",
@@ -243,7 +272,7 @@
     "usernamePlaceholder": "Leave blank to use your email address",
     "usernameHint": "Only needed if your provider uses a separate login username instead of your email address. Check your provider's mail settings (e.g. \"Username\" or \"Account name\").",
     "advancedToggle": "Advanced settings",
-    "advancedHint": "Security modes and a separate login username. The defaults work for almost every mailbox.",
+    "advancedHint": "Connection type, security modes and a separate login username. The defaults work for almost every mailbox.",
     "imapSectionLabel": "IMAP (receiving mail)",
     "smtpSectionLabel": "SMTP (sending mail)",
     "hostPasteHint": "You can paste the host with its port, like imap.example.com:993.",
@@ -256,6 +285,13 @@
     "hostPrefillAppPassword": "{provider} needs an app password, not your normal account password.",
     "portMovedNote": "Moved port {port} into the {protocol} port field.",
     "imapHostLabel": "IMAP host",
+    "connectionModeLabel": "Connection type",
+    "connectionModeBoth": "Send and receive (IMAP + SMTP)",
+    "connectionModeImap": "Receive only (IMAP)",
+    "connectionModeSmtp": "Send only (SMTP)",
+    "connectionModeBothHint": "Read, organize and send mail from this address.",
+    "connectionModeImapHint": "Read, search and organize mail. Sending from this address will be turned off.",
+    "connectionModeSmtpHint": "Send mail from this address. Reading and organizing mail will be turned off.",
     "imapPortLabel": "IMAP port",
     "smtpHostLabel": "SMTP host",
     "smtpPortLabel": "SMTP port",
@@ -322,7 +358,203 @@
     "outlookAdminLink": "Get the approval link for your admin",
     "microsoftAddressNotice": "This is a Microsoft account. Microsoft accounts connect with Sign in with Microsoft; IMAP with a password no longer works for them.",
     "microsoftAddressAction": "Use Sign in with Microsoft",
-    "errorMicrosoftAccountShort": "Microsoft no longer accepts a password for this account. Connect it with the Outlook card instead."
+    "errorMicrosoftAccountShort": "Microsoft no longer accepts a password for this account. Connect it with the Outlook card instead.",
+    "businessCapTitle": "Business connects more than 10 mailboxes",
+    "businessCapBody": "Pro connects 10 mailboxes. Business includes 10 for $39 a month and adds each extra mailbox for $3 a month, with unlimited members at no extra cost.",
+    "businessCapCta": "Upgrade to Business, $39/mo",
+    "businessFeatureInboxes": "10 mailboxes included, $3 a month for each extra",
+    "businessFeatureMembers": "Unlimited members with roles, at no extra cost",
+    "businessFeatureApprovals": "Admins approve held sends",
+    "businessFeatureWorkspaces": "Several workspaces on one subscription",
+    "fix": {
+      "heading": "How to fix it",
+      "testAgain": "Test again",
+      "useOutlook": "Use Microsoft sign-in",
+      "receiveOnly": "Connect for reading only",
+      "useSuggestedHost": "Use {host}",
+      "progressLogin": "Checking login...",
+      "progressSending": "Checking sending...",
+      "progressSlow": "Still checking. Some mail servers take up to a minute to answer.",
+      "gmail": {
+        "twoStep": "Turn on 2-Step Verification for your Google account.",
+        "create": "Create an app password at myaccount.google.com/apppasswords and name it MCPEmails.",
+        "paste": "Paste the 16 letters into the password field. Spaces are fine.",
+        "workspace": "On a work or school account the app password option can be missing because your admin turned it off. If so, ask your admin to allow app passwords.",
+        "imapDisabled": "Your Google Workspace admin has turned off IMAP for your account, so no password can work.",
+        "imapDisabledAdmin": "Send this to your IT admin: please turn on IMAP access for my account in the Google Admin console, under Apps, Google Workspace, Gmail, End User Access."
+      },
+      "appPassword": {
+        "normalRejected": "Your normal {provider} password is rejected here. Only an app password works.",
+        "paste": "Paste it into the password field and press Test again."
+      },
+      "yahoo": {
+        "create": "On Yahoo's Account Security page, under External connections, choose Create app password, name it MCPEmails and generate it."
+      },
+      "aol": {
+        "create": "On AOL's Account Security page, generate an app password and name it MCPEmails. If the option is missing, turn on 2-Step Verification first."
+      },
+      "icloud": {
+        "create": "At account.apple.com, open Sign-In and Security, then App-Specific Passwords, and create one named MCPEmails. Two-factor authentication must be on."
+      },
+      "ionos": {
+        "password": "IONOS wants the password of this email address, not the one you use to sign in to IONOS.",
+        "platform": "IONOS has separate mail servers for the US and for Europe. If your IONOS contract is European, use your country's server, such as imap.ionos.de or imap.ionos.co.uk, instead of imap.ionos.com."
+      },
+      "fullAddress": "Use your full email address as the login.",
+      "tOnline": {
+        "password": "Telekom accepts only your Passwort für E-Mail-Programme here, not your Telekom Login password.",
+        "where": "Set it in the E-Mail Center under Einstellungen, then Passwörter, then Passwort für E-Mail-Programme."
+      },
+      "mailRu": {
+        "create": "In Mail.ru, open Settings, All settings, Security, then Passwords for external applications, and create one with full Mail access."
+      },
+      "qq": {
+        "service": "In QQ Mail, open 设置 (Settings), then 账号与安全 (Account and security), and turn on the POP3/IMAP/SMTP service.",
+        "code": "Generate an authorization code (授权码) and paste it into the password field. Your QQ password will not work."
+      },
+      "mailCom": {
+        "imap": "Turn on IMAP at mail.com: Email, Settings, POP3 and IMAP, then tick Enable access to this account via POP3 and IMAP. IMAP needs a mail.com Premium plan.",
+        "twoFactor": "With two-factor authentication on, create an application-specific password under Security Options and use that."
+      },
+      "infomaniak": {
+        "password": "Infomaniak does not accept your Manager password here. In the Manager, open Mail Service, your address, then Devices, and add a device to get a device password."
+      },
+      "orange": {
+        "imap": "Turn on POP/IMAP in your Orange mailbox: the cog, tous les paramètres, Sécurité, Protocoles POP ou IMAP, then Activer POP/IMAP.",
+        "password": "Then use the mot de passe dédié from your Espace client, under Connexion et sécurité."
+      },
+      "seznam": {
+        "password": "If two-factor authentication (dvoufázové ověření) is on, your Seznam password stops working here. Set a Heslo pro aplikace under Zabezpečení účtu and use that."
+      },
+      "aruba": {
+        "password": "Aruba checks the password of this mailbox, set under Gestione caselle in the Aruba panel, not your Aruba customer-area login. On a Hosting Basic plan from before June 2017, IMAP is a separate add-on that has to be active on the domain."
+      },
+      "libero": {
+        "password": "With Password Sicura on, Libero and Virgilio refuse your normal password in mail apps. Open Password per App in the account area and use the 16-character Password Specifica per Applicazioni shown there; it is one password for every app you connect."
+      },
+      "tim": {
+        "line": "TIM allows mail apps only on a mailbox tied to an active TIM landline or mobile line. Without one, TIM lets mail apps in from its own network only, which MCPEmails is not."
+      },
+      "tiscali": {
+        "password": "Tiscali takes your Tiscali Mail password with the full address. Its help documents two-factor authentication for the webmail login only and says nothing about mail apps, so if it is on and the login fails, that is the first thing to check."
+      },
+      "arubaPec": {
+        "password": "With verifica in 2 passaggi on, Aruba PEC refuses the mailbox password in mail apps. Generate a Password per programmi di posta under Gestione account PEC, then Sicurezza, and use that. It expires after six months."
+      },
+      "legalmail": {
+        "password": "Legalmail signs in with the User ID or the PEC address and the mailbox password; a User ID goes in the Username field under Advanced settings. If you use an Application Password instead, create a 16-digit one under Password applicative in the account settings; each has its own expiry date, so check it has not lapsed."
+      },
+      "postecert": {
+        "password": "On PEC Postecertifica, open the PEC dashboard, choose Genera password and use that client password; the webmail password is never accepted and the client password expires every 90 days."
+      },
+      "centrum": {
+        "password": "With dvoufaktorové ověření on, Centrum, Atlas and Volný refuse your password in mail apps. Generate an aplikační heslo in the Dvoufaktorové ověření section of the web settings, on a computer, and use that.",
+        "smtp": "Sending needs the free enlarged mailbox (navýšení schránky): confirm a phone number in the web settings, then test again."
+      },
+      "wp": {
+        "imap": "Turn on IMAP in {provider}: Opcje, the IMAP/POP tab, then IMAP (pobieraj i wysyłaj wiadomości).",
+        "twoStep": "With logowanie dwustopniowe on, create a hasło do programu pocztowego under Bezpieczeństwo, Logowanie dwustopniowe, and use that instead of your {provider} password."
+      },
+      "onet": {
+        "protocols": "Unblock IMAP and SMTP in Onet Poczta: Ustawienia (the cog), Konto, the Konto Główne tab, then the switch on each protocol's tile.",
+        "appPassword": "With weryfikacja dwuetapowa on, generate a hasło do aplikacji under Bezpieczeństwo in Onet Konto and use that instead of your Onet password."
+      },
+      "interia": {
+        "program": "In Interia, open Ustawienia, Ustawienia główne, the Parametry tab, and set korzystam z programu pocztowego to TAK.",
+        "twoStep": "Interia blocks mail programs while logowanie dwuetapowe is on and has no app passwords. Turn it off to connect."
+      },
+      "gmx": {
+        "imap": "{provider} switches POP3 and IMAP access off by default. Turn it on under E-Mail-Einstellungen, then POP3/IMAP.",
+        "twoFactor": "With two-factor authentication on, use an app password instead of your normal password."
+      },
+      "zoho": {
+        "imap": "Turn on IMAP access in Zoho Mail under Settings, Mail Accounts, IMAP Access.",
+        "twoFactor": "With two-factor authentication, federated sign-in or SAML, generate an application-specific password and use that."
+      },
+      "yandex": {
+        "create": "At id.yandex.com, open Security, then App passwords, and create one of type Mail.",
+        "imap": "In Yandex Mail settings, open Email clients and turn on both IMAP access and App passwords and OAuth tokens."
+      },
+      "office365": {
+        "useOutlook": "Microsoft 365 work and school mailboxes do not accept passwords from mail apps. Connect it with Microsoft sign-in instead."
+      },
+      "smtp": {
+        "readingOk": "Your server accepted the login for reading mail but refused it for sending.",
+        "username": "If your provider gives you a separate login for sending, enter it under Advanced settings, Username.",
+        "readOnly": "Or connect for reading only now and add sending later in the inbox settings."
+      },
+      "unreachable": {
+        "tried": "We tried {host} and the server did not answer.",
+        "notFound": "We could not find a mail server called {host}.",
+        "suggest": "Your address is at {provider}, whose server is {host}.",
+        "check": "Check the server name on your provider's settings page, then test again.",
+        "blocked": "Your mail server does not accept connections from our servers. This is common with school and company mail servers.",
+        "blockedNext": "Ask your IT team to allow access from outside, or connect a different address."
+      },
+      "tls": {
+        "tried": "We tried port {tlsPort} with TLS and port {starttlsPort} with STARTTLS, and the secure connection failed on both.",
+        "next": "If your provider lists a different port or security setting, change it here and test again."
+      },
+      "link": {
+        "twoStep": "Open 2-Step Verification",
+        "appPasswords": "Open the {provider} app password page",
+        "imapSetting": "How to turn on IMAP at {provider}",
+        "providerHelp": "{provider} help page",
+        "adminGuide": "Google's guide for your admin",
+        "emailCenter": "Open the {provider} E-Mail Center"
+      },
+      "outlookConsent": {
+        "line1": "Microsoft will show a consent screen listing what MCPEmails may do: read and change mail, send mail, and stay connected.",
+        "line2": "Accept it to connect. You type your Microsoft password only on Microsoft's page.",
+        "line3": "A work account may ask for admin approval instead. If it does, come back here and get the link for your admin."
+      },
+      "outlookCancelled": {
+        "title": "You cancelled on Microsoft's page",
+        "body": "Nothing was connected. To connect your Outlook inbox, accept the consent screen when Microsoft shows it.",
+        "tryAgain": "Try again"
+      },
+      "done": {
+        "title": "Inbox connected",
+        "body": "Now connect your AI app so it can use this inbox.",
+        "bodyClient": "Now connect {client} so it can use this inbox.",
+        "openGuide": "Show me how",
+        "later": "Later"
+      },
+      "mailbox": {
+        "password": "{provider} wants the password of this email address, not the one you use to sign in to your {provider} account."
+      },
+      "uol": {
+        "imap": "UOL refuses mail apps until IMAP is on. In UOL webmail, open Configurações and choose Ativar IMAP, then test again."
+      },
+      "yahooJapan": {
+        "access": "Yahoo! JAPAN has no app passwords. In Yahoo! JAPAN mail settings, allow access from other mail apps and turn on both IMAP and SMTP.",
+        "password": "Then use your normal Yahoo! JAPAN ID password. If you sign in without a password (passkey or SMS), set a password first."
+      },
+      "docomo": {
+        "setting": "In My docomo, open メール設定, then dアカウントの利用設定, and turn on dアカウントでドコモメールを利用する. This only works over the mobile network, not Wi-Fi.",
+        "login": "Then enter the IMAP専用ID from My docomo in Username (optional) under Advanced settings, and the IMAP専用パスワード as the password."
+      },
+      "nifty": {
+        "imap": "In @nifty mail settings, set メールソフト接続許可（IMAP） to 許可中 (allowed), then test again."
+      },
+      "soNet": {
+        "option": "So-net mail works in mail apps over IMAP only with the paid IMAP service option (IMAPサービス). Add it to your So-net contract first."
+      },
+      "plala": {
+        "imap": "In plala Webmail, turn on IMAPを利用する (use IMAP) first, then test again."
+      },
+      "freenet": {
+        "imap": "freenet refuses mail apps until POP3, IMAP and SMTP are activated in your freenet Mail settings. Turn them on, then test again."
+      }
+    },
+    "businessCapBodyFounder": "Pro connects 10 mailboxes. Business includes 10, with unlimited members at no extra cost.",
+    "businessCapCtaFounder": "Upgrade to Business, ${price}/mo",
+    "businessCapBodySeat": "Pro connects 10 mailboxes. On Business each person connects up to 10 of their own, privately, and 10 company-wide mailboxes are included, then $3 a month each. Billed per person who connects a mailbox, 2 people minimum.",
+    "businessCapCtaSeat": "Upgrade to Business",
+    "businessSeatFeaturePrivate": "Private mailboxes for each person, up to 10 each",
+    "businessSeatFeatureCompany": "10 company-wide mailboxes included, $3 a month for each extra",
+    "businessSeatFeatureRules": "Recipient rules for outgoing mail",
+    "errorYahooJapanShort": "Yahoo! JAPAN mail is a separate service from Yahoo Mail and has no app passwords. Go back and choose IMAP / SMTP instead."
   },
   "commandPalette": {
     "pageOverview": "Overview",
@@ -333,6 +565,7 @@
     "pageApprovals": "Approvals",
     "pageSettings": "Settings",
     "pageSecurity": "Security",
+    "pageHelp": "Help & support",
     "groupTitlePage": "Page",
     "actionConnectInbox": "Connect inbox",
     "groupTitleAction": "Action",
@@ -374,7 +607,7 @@
   },
   "adminConsentLink": {
     "title": "Send this link to your IT admin",
-    "body": "Send this link to your Microsoft 365 administrator. They sign in with their Microsoft admin account and approve once; they don't need an MCP Emails account. After that, everyone in your organisation can connect Outlook.",
+    "body": "Send this link to your Microsoft 365 administrator. They sign in with their Microsoft admin account and approve once; they don't need an MCPEmails account. After that, everyone in your organisation can connect Outlook.",
     "label": "Approval link",
     "loading": "Creating link...",
     "copy": "Copy",
@@ -387,20 +620,56 @@
   },
   "adminConsentResult": {
     "grantedTitle": "Approved",
-    "grantedBody": "Your team can now connect Outlook in MCP Emails. Nobody needs to approve anything else: each person signs in with Microsoft when they connect their own mailbox.",
+    "grantedBody": "Your team can now connect Outlook in MCPEmails. Nobody needs to approve anything else: each person signs in with Microsoft when they connect their own mailbox.",
     "cancelledTitle": "Not approved",
     "cancelledBody": "The approval was cancelled on Microsoft's screen, so nothing changed. Open the link again whenever you are ready.",
     "failedTitle": "The approval did not go through",
     "failedBody": "Microsoft did not confirm the approval. Approving needs a Microsoft 365 administrator account, such as a Global Administrator or Cloud Application Administrator. Sign in with one and open the link again.",
     "link_invalidTitle": "This link is not valid",
-    "link_invalidBody": "The approval link is incomplete or has been changed. Ask the person who sent it for a new one from their MCP Emails dashboard.",
+    "link_invalidBody": "The approval link is incomplete or has been changed. Ask the person who sent it for a new one from their MCPEmails dashboard.",
     "link_expiredTitle": "This link has expired",
-    "link_expiredBody": "Approval links work for 7 days. Ask the person who sent it for a new one from their MCP Emails dashboard.",
+    "link_expiredBody": "Approval links work for 7 days. Ask the person who sent it for a new one from their MCPEmails dashboard.",
     "timed_outTitle": "Please start again",
     "timed_outBody": "The approval took too long or finished in a different browser. Open the approval link again in this browser.",
     "unavailableTitle": "Something went wrong",
     "unavailableBody": "We could not start the approval. Please try again in a few minutes.",
-    "closeHint": "Questions? Email hello@mcpemails.com.",
-    "openApp": "Open MCP Emails"
+    "closeHint": "Questions? Email support@mcpemails.com.",
+    "openApp": "Open MCPEmails"
+  },
+  "seasonal": {
+    "badge": "Black Week",
+    "line": "Black Week: ${firstYear} for your first year, then ${renewal} a year. You save ${saving}.",
+    "ends": "Ends {date}, {time} Oslo time.",
+    "ctaAnnual": "Upgrade to {plan}, annual",
+    "switchBody": "Black Week: switch to annual for ${firstYear} your first year, then ${renewal} a year. The unused days of your current month are taken off, so you pay a bit less than that today.",
+    "switchCta": "Switch to annual",
+    "switchBusy": "Preparing...",
+    "ended": "The Black Week offer has ended, so nothing was charged. The amounts above are the regular price."
+  },
+  "annualSwitch": {
+    "title": "Switch to annual billing",
+    "body": "Pay for {plan} once a year and save {percent}% compared with paying monthly.",
+    "current": "The unused days of your current month are credited, so today's charge is a bit less than a full year. You see the exact amount before anything is charged.",
+    "cta": "Switch to annual",
+    "busy": "Preparing...",
+    "noticeBody": "You pay for {plan} every month. Annual billing costs {percent}% less.",
+    "noticeCta": "See annual billing",
+    "close": "Close"
+  },
+  "founder": {
+    "line": "Founder price: ${price} a month, kept for as long as you stay subscribed. Open to the first {total} companies or until 31 December 2026, whichever comes first. Extra mailboxes are ${addon} a month each.",
+    "places": "{left} of {total} places left",
+    "priceChanged": "The price changed before you confirmed, so nothing was charged. The amounts above are the price that applies now."
+  },
+  "onboardingEntry": {
+    "finishSetup": "Finish setup",
+    "resetTitle": "Reset onboarding",
+    "resetBody": "Internal accounts only. Clears this workspace's setup progress and first-call markers so you can run the setup flow again. Inboxes and keys stay connected.",
+    "resetButton": "Reset onboarding",
+    "resetFailed": "Could not reset onboarding. Try again."
+  },
+  "help": {
+    "loading": "Loading help…",
+    "loadError": "Could not load help. Reload the page or email support@mcpemails.com."
   }
 }

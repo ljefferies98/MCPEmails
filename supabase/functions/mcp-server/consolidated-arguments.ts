@@ -272,12 +272,17 @@ function ownerPhrase(owners: string[]): string {
  *
  * Errors this review says nothing about are returned untouched, so a `not`
  * rule from anywhere else keeps its own wording.
+ *
+ * `remedies` (argument-remedies.ts) adds, per property, the fact that answers
+ * what the caller was trying to do, ahead of the owning actions: "to belongs
+ * to 'send'" alone sent every reply that carried a `to` out as a new message.
  */
 export function withOwningActions<T extends SchemaErrorLike>(
   errors: readonly T[],
   review: ExtraArgumentReview,
   action: string,
   rootPath = "arguments",
+  remedies: Readonly<Record<string, string>> = {},
 ): T[] {
   if (review.misplaced.length === 0) return [...errors];
   const byPath = new Map<string, MisplacedArgument>();
@@ -286,10 +291,12 @@ export function withOwningActions<T extends SchemaErrorLike>(
     if (error.keyword !== "not") return error;
     const entry = byPath.get(error.path);
     if (!entry || entry.owners.length === 0) return error;
+    const remedy = remedies[entry.property];
     return {
       ...error,
       message:
-        `is not an argument of action '${action}'; it belongs to ` +
+        `is not an argument of action '${action}'` +
+        (remedy ? `: ${remedy}. It belongs to ` : "; it belongs to ") +
         ownerPhrase(entry.owners),
     };
   });
@@ -365,4 +372,43 @@ export function normalizeMessageIdShape(
     return "to_single";
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// `folder` on a search (2026-10-24).
+//
+// `email_read {action: "search", folder: "Demo"}` dropped `folder` as a list
+// argument and searched INBOX, with a note saying so. The note was accurate
+// and still wrong for the caller: the published map lists `folder` beside the
+// search fields, and a model asking to search one folder reads it as exactly
+// that. Search already has the argument that means it, `include_folders`, and
+// on every provider a one-entry list scopes the search to that folder and no
+// other (IMAP selects it alone; Gmail sends one labelIds; Graph fans out to
+// one folder). So `folder: X` becomes `include_folders: [X]` on an action that
+// takes include_folders and not folder.
+//
+// Rewritten only when include_folders is absent or empty, or already names X.
+// A non-empty list that does not name X is two different scopes in one call,
+// and `folder` is left for the review to drop and disclose, as before.
+// ---------------------------------------------------------------------------
+
+/** Rewrite `folder` into `include_folders` where `allowed` takes only the latter. Returns true on a rewrite. */
+export function normalizeSearchFolderScope(
+  allowed: readonly string[],
+  args: Record<string, unknown>,
+): boolean {
+  if (!allowed.includes("include_folders") || allowed.includes("folder")) return false;
+  const folder = args["folder"];
+  if (typeof folder !== "string" || folder.trim() === "") return false;
+  const listed = args["include_folders"];
+  if (listed === undefined || (Array.isArray(listed) && listed.length === 0)) {
+    args["include_folders"] = [folder];
+    delete args["folder"];
+    return true;
+  }
+  if (Array.isArray(listed) && listed.includes(folder)) {
+    delete args["folder"];
+    return true;
+  }
+  return false;
 }

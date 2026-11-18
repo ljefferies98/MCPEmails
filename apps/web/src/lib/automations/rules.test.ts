@@ -10,6 +10,7 @@ import {
   FILTER_STRING_FIELDS,
   providerSearchLabel,
   unrunnableFilterFields,
+  validateAction,
   validateFilter,
   validateFilterForProvider,
 } from './rules.ts';
@@ -55,6 +56,36 @@ test('the two copies of the automation filter field lists agree', () => {
       `${engineName} and its web counterpart have drifted; a rule saved here would fail every run`,
     );
   }
+});
+
+test('a move into trash is refused in any language, and junk is allowed', () => {
+  // The dashboard and REST write path refuse the same names the runner does,
+  // because both call the edge function's isForbiddenMoveDestination. Until
+  // 2026-10-20 this side held its own English-only copy, so "Papierkorb" saved.
+  for (const folder of [
+    'Trash', '[Gmail]/Trash', 'INBOX.Deleted Items', 'Papierkorb', 'INBOX/Корзина',
+    'Éléments supprimés', 'ごみ箱', 'INBOX.Gelöschte Elemente',
+  ]) {
+    const result = validateAction({ type: 'move', folder });
+    assert.equal(result.ok, false, `move to '${folder}' must be refused`);
+  }
+  for (const folder of [
+    'Archive', 'Archiv', 'Clients', 'Trashed drafts', 'Junk', 'Spam', 'Junk Email', 'Bulk',
+    'Correo no deseado',
+  ]) {
+    const result = validateAction({ type: 'move', folder });
+    assert.equal(result.ok, true, `move to '${folder}' must stay allowed`);
+  }
+});
+
+test('the web validator uses the engine\'s forbidden-destination check, not a copy', () => {
+  // A second list is how this side stayed English while the engine's folder
+  // resolver learned 42 languages. Keep it an import.
+  const source = fs.readFileSync(path.resolve(HERE, 'rules.ts'), 'utf8');
+  assert.match(source, /import \{ isForbiddenMoveDestination \} from '[./]+\/supabase\/functions\/mcp-server\/triage-forbidden-destinations\.ts'/);
+  assert.doesNotMatch(source, /FORBIDDEN_MOVE_DESTINATIONS = \[/, 'a local copy of the list is back');
+  const engine = fs.readFileSync(ENGINE_COPY, 'utf8');
+  assert.match(engine, /if \(isForbiddenMoveDestination\(folder\)\)/, 'the engine no longer refuses by the shared check');
 });
 
 test('a provider-native raw query cannot be saved as an automation filter', () => {
@@ -247,4 +278,45 @@ test('the hidden web-client key cannot be bound to an automation', async () => {
   const hidden = await assertWorkspaceResources(db, 'ws-1', 'inbox-1', 'key-hidden');
   assert.deepEqual(missing, { error: 'That API key is not available in this workspace.', status: 400 });
   assert.deepEqual(hidden, missing);
+});
+
+test("privacy: an automation cannot be pointed at someone else's private inbox (owner/admin included)", async () => {
+  // Migration 20261111190000: inbox_visible_to() decides; the dashboard API is
+  // the service role, so RLS does not do it for us. An RPC error fails closed.
+  const rows: Record<string, Record<string, unknown>[]> = {
+    inboxes: [{ id: 'inbox-1', workspace_id: 'ws-1', deleted_at: null }],
+    api_keys: [{ id: 'key-plain', workspace_id: 'ws-1', kind: null, scopes: [], inbox_ids: null, deleted_at: null }],
+  };
+  let visible: boolean | 'error' = false;
+  const rpcCalls: Array<Record<string, unknown>> = [];
+  const db = {
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      assert.equal(name, 'inbox_visible_to');
+      rpcCalls.push(args);
+      return visible === 'error' ? { data: null, error: { message: 'boom' } } : { data: visible, error: null };
+    },
+    from(table: string) {
+      let matches = rows[table] ?? [];
+      const chain = {
+        select: () => chain,
+        eq: (column: string, value: unknown) => {
+          matches = matches.filter((row) => row[column] === value);
+          return chain;
+        },
+        is: (column: string, value: unknown) => {
+          matches = matches.filter((row) => (row[column] ?? null) === value);
+          return chain;
+        },
+        maybeSingle: async () => ({ data: matches[0] ?? null, error: null }),
+      };
+      return chain;
+    },
+  };
+  const refused = { error: 'That inbox is not available in this workspace.', status: 400 };
+  assert.deepEqual(await assertWorkspaceResources(db, 'ws-1', 'inbox-1', 'key-plain', 'user-1'), refused);
+  assert.deepEqual(rpcCalls, [{ p_inbox_id: 'inbox-1', p_user_id: 'user-1' }]);
+  visible = 'error';
+  assert.deepEqual(await assertWorkspaceResources(db, 'ws-1', 'inbox-1', 'key-plain', 'user-1'), refused);
+  visible = true;
+  assert.equal(await assertWorkspaceResources(db, 'ws-1', 'inbox-1', 'key-plain', 'user-1'), null);
 });
