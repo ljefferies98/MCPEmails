@@ -8,7 +8,13 @@ const SOURCE = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
 const MIGRATION = await Deno.readTextFile(
   new URL("../../migrations/20261117120000_held_send_dedupe_key.sql", import.meta.url),
 );
-const SELF_HOST = await Deno.readTextFile(new URL("../../../self-host/db/00-schema.sql", import.meta.url));
+// Self-host (this fork) keeps numbered migrations instead of one 00-schema.sql;
+// together they are the self-host schema.
+const SELF_HOST_MIGRATIONS = new URL("../../../self-host/db/migrations/", import.meta.url);
+const selfHostSchema = () =>
+  [...Deno.readDirSync(SELF_HOST_MIGRATIONS)].map((e) => e.name).filter((n) => n.endsWith(".sql")).sort()
+    .map((n) => Deno.readTextFileSync(new URL(n, SELF_HOST_MIGRATIONS))).join("\n");
+const SELF_HOST = selfHostSchema();
 
 const body = (name: string) => {
   const start = SOURCE.indexOf(`function ${name}(`);

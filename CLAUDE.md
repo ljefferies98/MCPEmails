@@ -13,7 +13,7 @@ This repo is public. Never commit customer email addresses, customer or company 
 - `apps/mcp-app`: the in-chat draft card. Its build is generated into `supabase/functions/mcp-server/ui/review-card.html.ts`.
 - `supabase/functions`: Deno edge functions. `mcp-server` is the product; also `client-api`, `system-notify`, `synthetic-monitor`, `outlook-token-refresh`.
 - `supabase/migrations`, `supabase/tests`: schema, RLS and pgTAP tests.
-- `self-host/`: Docker self-host stack. `self-host/db/00-schema.sql` must keep up with what mcp-server queries (a test enforces it).
+- `self-host/`: Docker self-host stack. This fork keeps numbered migrations in `self-host/db/migrations/` instead of `00-schema.sql`: every new `supabase/migrations` file must be classified in `self-host/db/upstream-migrations.tsv`, and anything mcp-server reads is ported as the next `NNNN_*.sql` (`self-host/tests/` and `mcp-server/self-host-schema.test.ts` enforce it).
 - `packages/mcpemails`: the npm package. `tools/video-studio`: video pipeline (read its `AGENTS.md`).
 
 ## Shipping

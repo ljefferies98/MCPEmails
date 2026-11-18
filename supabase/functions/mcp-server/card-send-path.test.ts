@@ -30,6 +30,13 @@ import {
   recordCardActivity,
 } from "./card-activity.ts";
 
+// Self-host (this fork) keeps numbered migrations instead of one 00-schema.sql;
+// together they are the self-host schema.
+const SELF_HOST_MIGRATIONS = new URL("../../../self-host/db/migrations/", import.meta.url);
+const selfHostSchema = () =>
+  [...Deno.readDirSync(SELF_HOST_MIGRATIONS)].map((e) => e.name).filter((n) => n.endsWith(".sql")).sort()
+    .map((n) => Deno.readTextFileSync(new URL(n, SELF_HOST_MIGRATIONS))).join("\n");
+
 const index = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
 const fnBody = (name: string): string => {
   const start = index.indexOf(`async function ${name}(`);
@@ -272,7 +279,7 @@ Deno.test("deleted: the database accepts the new action", async () => {
   const dir = new URL("../../migrations/", import.meta.url);
   const sql = await Deno.readTextFile(new URL("20261026210000_draft_card_activity_deleted.sql", dir));
   assertStringIncludes(sql, "CHECK (action IN ('saved', 'sent', 'deleted'))");
-  const selfHost = await Deno.readTextFile(new URL("../../../self-host/db/00-schema.sql", import.meta.url));
+  const selfHost = selfHostSchema();
   assertStringIncludes(selfHost, "ARRAY['saved'::text, 'sent'::text, 'deleted'::text]");
 });
 

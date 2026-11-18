@@ -275,6 +275,40 @@ product (`email_read`, `email_compose`, `email_organize`, `draft`, `schedule`, `
 Send-like calls accept an `idempotency_key`, which makes retries safe; it is enforced, and a call
 with a key is refused rather than sent unprotected if the record cannot be written.
 
+## Optional features
+
+Hosted turns these on from the dashboard. Self-host has none, so set them in SQL (`make psql`).
+Everything below is off until you set it, except the send brakes.
+
+```sql
+-- Embed signature images in the message (cid:) instead of linking them.
+UPDATE inboxes SET signature_embed_images = true WHERE email_address = 'ops@co.example';
+
+-- Pick the folders yourself when auto-detection gets them wrong. NULL = auto-detect.
+UPDATE inboxes SET folder_overrides = '{"sent": "INBOX.Sent", "trash": "INBOX.Trash"}'
+ WHERE email_address = 'ops@co.example';
+
+-- Send As: an extra From address for an inbox (the `from` argument on send tools). Hosted verifies
+-- it by emailing a code; here you vouch for it by setting verified_at.
+INSERT INTO inbox_sender_aliases (inbox_id, email_address, display_name, verified_at)
+SELECT id, 'sales@co.example', 'Sales', now() FROM inboxes WHERE email_address = 'ops@co.example';
+
+-- The AI must ask you in the chat before each send from this inbox.
+UPDATE inboxes SET send_review_mode = 'chat' WHERE email_address = 'ops@co.example';
+
+-- How long a held (approval-required) send stays decidable: 24, 72, 168 or 336 hours.
+UPDATE workspaces SET approval_window_hours = 72;
+
+-- Pro features: reminders (follow-ups, snoozes), search across all inboxes, per-inbox AI
+-- instructions (inboxes.ai_instructions) and the morning brief. The dispatcher already calls
+-- /reminders-dispatch and /morning-brief-dispatch.
+UPDATE workspaces SET pro_features_enabled = true;
+```
+
+**Send brakes** are on by default: at most 500 messages per inbox per 24 hours, a one-hour hold
+when one message goes to more than 25 recipients, and a pause after repeated spam refusals. Raise
+the fan-out limit with `UPDATE workspaces SET fanout_recipient_limit = 100;`.
+
 ## Upgrading
 
 The database schema upgrades itself. Each deploy runs `migrate` first, which applies whatever

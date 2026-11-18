@@ -49,6 +49,13 @@ import {
   statusesForFilter,
 } from "./reminders-engine.ts";
 
+// Self-host (this fork) keeps numbered migrations instead of one 00-schema.sql;
+// together they are the self-host schema.
+const SELF_HOST_MIGRATIONS = new URL("../../../self-host/db/migrations/", import.meta.url);
+const selfHostSchema = () =>
+  [...Deno.readDirSync(SELF_HOST_MIGRATIONS)].map((e) => e.name).filter((n) => n.endsWith(".sql")).sort()
+    .map((n) => Deno.readTextFileSync(new URL(n, SELF_HOST_MIGRATIONS))).join("\n");
+
 const NOW = Date.parse("2026-10-24T12:00:00Z");
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -477,7 +484,7 @@ Deno.test("reconnecting an inbox re-arms its backed-off reminders (migration tri
   for (const clause of ["consecutive_failures > 0", "claimed_at IS NULL", "kind = 'follow_up' OR due_at <= now()"]) {
     assert(body.includes(clause), clause);
   }
-  const selfHost = await Deno.readTextFile(new URL("../../../self-host/db/00-schema.sql", import.meta.url));
+  const selfHost = selfHostSchema();
   assert(selfHost.includes("CREATE TRIGGER reminders_rearm_on_reconnect"));
 });
 

@@ -103,6 +103,13 @@ const INTENTIONALLY_ABSENT: Record<string, string> = {
   reserve_action_usage: "usage-cap enforcement; skipped by USAGE_ENFORCEMENT_DISABLED=true",
   finalize_action_usage_reservation: "usage-cap enforcement; skipped by USAGE_ENFORCEMENT_DISABLED=true",
   record_usage_limit_event: "usage-cap enforcement; skipped by USAGE_ENFORCEMENT_DISABLED=true",
+  experiments: "hosted pricing experiments on the usage-cap refusal; only reached when caps are enforced, failures logged",
+  experiment_assign: "hosted pricing experiments on the usage-cap refusal; only reached when caps are enforced, failures logged",
+  checkout_link_issue: "Stripe checkout link in the usage-cap refusal; only reached when caps are enforced, logged as checkout_link_mint_failed",
+  claim_onboarding_welcome: "hosted dashboard onboarding note on the first tool call; caught and logged, the call proceeds",
+  claim_usage_meter_note: "Free-plan usage meter note; only for plan 'free' with caps enforced, caught and logged",
+  onboarding_convert_on: "hosted onboarding Flow B cap summary; caught and logged, the refusal is sent without it",
+  usage_month_summary: "hosted onboarding Flow B cap summary; caught and logged, the refusal is sent without it",
 };
 
 function serverReferences(kind: "from" | "rpc"): Set<string> {

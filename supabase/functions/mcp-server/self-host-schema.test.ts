@@ -23,12 +23,23 @@
 // only filtered on. Those fail more quietly on a self-host install, so when a
 // migration adds one the server writes, add it to 00-schema.sql in the same PR
 // anyway.
+//
+// This fork replaced 00-schema.sql with numbered migrations
+// (self-host/db/migrations/NNNN_*.sql); the schema read here is all of them in
+// order, and the tables/RPCs self-host deliberately leaves out are the ones in
+// INTENTIONALLY_ABSENT in self-host/tests/manifest.test.ts, with the reasons.
 // ---------------------------------------------------------------------------
 
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
 const SERVER_DIR = new URL("./", import.meta.url);
-const SCHEMA_PATH = new URL("../../../self-host/db/00-schema.sql", import.meta.url);
+const MIGRATIONS_DIR = new URL("../../../self-host/db/migrations/", import.meta.url);
+const SCHEMA_SQL = [...Deno.readDirSync(MIGRATIONS_DIR)].map((e) => e.name).filter((n) => n.endsWith(".sql")).sort()
+  .map((n) => Deno.readTextFileSync(new URL(n, MIGRATIONS_DIR))).join("\n");
+const ABSENT = new Set(
+  [...Deno.readTextFileSync(new URL("../../../self-host/tests/manifest.test.ts", import.meta.url))
+    .matchAll(/^  ([a-z_]+): "/gm)].map((m) => m[1]),
+);
 
 async function serverSources(): Promise<Map<string, string>> {
   const sources = new Map<string, string>();
@@ -60,7 +71,7 @@ export function parseSchema(sql: string): SelfHostSchema {
       }
     }
   }
-  for (const match of sql.matchAll(/ALTER TABLE public\.(\w+)\n([\s\S]*?);/g)) {
+  for (const match of sql.matchAll(/ALTER TABLE public\.(\w+)\s([\s\S]*?);/g)) {
     const columns = table(match[1]);
     for (const added of match[2].matchAll(/ADD COLUMN IF NOT EXISTS (\w+)/g)) columns.add(added[1]);
   }
@@ -122,26 +133,26 @@ function projectionColumns(projection: string): string[] {
 }
 
 const sources = await serverSources();
-const schema = parseSchema(await Deno.readTextFile(SCHEMA_PATH));
+const schema = parseSchema(SCHEMA_SQL);
 
 Deno.test("self-host schema creates every table the server queries", () => {
   const missing = new Set<string>();
   for (const source of sources.values()) {
     for (const m of source.matchAll(/\.from\("([a-z_]+)"\)/g)) {
-      if (!schema.tables.has(m[1])) missing.add(m[1]);
+      if (!schema.tables.has(m[1]) && !ABSENT.has(m[1])) missing.add(m[1]);
     }
   }
-  assertEquals([...missing].sort(), [], "add these tables to self-host/db/00-schema.sql");
+  assertEquals([...missing].sort(), [], "port these tables as the next self-host/db/migrations/NNNN_*.sql");
 });
 
 Deno.test("self-host schema creates every RPC the server calls", () => {
   const missing = new Set<string>();
   for (const source of sources.values()) {
     for (const m of source.matchAll(/\.rpc\("([a-z_]+)"/g)) {
-      if (!schema.functions.has(m[1])) missing.add(m[1]);
+      if (!schema.functions.has(m[1]) && !ABSENT.has(m[1])) missing.add(m[1]);
     }
   }
-  assertEquals([...missing].sort(), [], "add these functions to self-host/db/00-schema.sql");
+  assertEquals([...missing].sort(), [], "port these functions as the next self-host/db/migrations/NNNN_*.sql");
 });
 
 Deno.test("self-host schema has every column the server selects", () => {
@@ -152,6 +163,7 @@ Deno.test("self-host schema has every column the server selects", () => {
   for (const [file, source] of sources) {
     // `.from("t")` followed, across whitespace only, by `.select(`.
     for (const m of source.matchAll(/\.from\("([a-z_]+)"\)\s*\.select\(/g)) {
+      if (ABSENT.has(m[1])) continue;
       const arg = callArgument(source, m.index! + m[0].length - 1);
       const projection = arg === null ? null : evaluateProjection(arg, constants);
       if (projection === null) {
@@ -167,18 +179,19 @@ Deno.test("self-host schema has every column the server selects", () => {
     }
   }
   assertEquals(unresolved, [], "teach evaluateProjection this projection shape");
-  assertEquals([...missing].sort(), [], "add these columns to self-host/db/00-schema.sql");
+  assertEquals([...missing].sort(), [], "port these columns as the next self-host/db/migrations/NNNN_*.sql");
   assert(checked > 100, `expected to check well over 100 selected columns, checked ${checked}`);
 });
 
 // decryptStoredToken() base64url-decodes the string PostgREST returns. A bytea
 // column comes back hex-encoded ("\x7678..."), which fails that decode on every
 // IMAP/SMTP call. The self-host schema had them as bytea until issue #82.
-Deno.test("self-host schema stores encrypted credentials as text", async () => {
-  const sql = await Deno.readTextFile(SCHEMA_PATH);
-  const inboxes = /CREATE TABLE IF NOT EXISTS public\.inboxes \(\n([\s\S]*?)\n\);/.exec(sql)?.[1] ?? "";
+Deno.test("self-host schema stores encrypted credentials as text", () => {
+  // 0001 creates them as bytea (the old layout); 0002 converts every one to
+  // text in place. self-host/tests/migrations.sh checks the result in Postgres.
+  const convert = /FOREACH col IN ARRAY ARRAY\[([^\]]*)\]/.exec(SCHEMA_SQL)?.[1] ?? "";
   for (const column of ["imap_password", "oauth_access_token", "oauth_refresh_token"]) {
-    assert(new RegExp(`^\\s+${column}\\s+text\\b`, "m").test(inboxes), `inboxes.${column} must be text`);
+    assert(convert.includes(`'${column}'`), `inboxes.${column} must be converted to text`);
   }
 });
 
@@ -257,6 +270,7 @@ Deno.test("self-host schema has every column the server filters on or updates", 
   let checked = 0;
   for (const [file, source] of sources) {
     for (const m of source.matchAll(/\.from\("([a-z_]+)"\)/g)) {
+      if (ABSENT.has(m[1])) continue;
       const columns = schema.tables.get(m[1]);
       for (const { method, arg } of chainedCalls(source, m.index! + m[0].length)) {
         const names = FILTER_METHODS.has(method)
@@ -271,7 +285,7 @@ Deno.test("self-host schema has every column the server filters on or updates", 
       }
     }
   }
-  assertEquals([...missing].sort(), [], "add these columns to self-host/db/00-schema.sql");
+  assertEquals([...missing].sort(), [], "port these columns as the next self-host/db/migrations/NNNN_*.sql");
   assert(checked > 200, `expected to check well over 200 filtered/updated columns, checked ${checked}`);
 });
 
